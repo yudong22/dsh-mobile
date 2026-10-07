@@ -56,6 +56,10 @@ Swift 中的 `@Published` 数据是 KMP 状态的平台观察镜像，不是第�
 
 KMP 不直接执行网络、磁盘、Keychain、UIKit 或 Android framework I/O。
 
+平台存储契约见 `shared/.../platform/GatewayPlatformContracts.kt`：transport、网络监控、偏好、
+凭据、附件缓存、**会话正文缓存（`GatewayConversationCache`）** 与时钟。磁盘读写由其平台实现负责，
+合并 / 水位 / 去重规则仍留在 KMP。
+
 ### 4.2 iOS `Core`
 
 - `AppStore.swift`：面向 View 的平台 State Holder；转发 Intent、发布 KMP change，协调平台 effect。

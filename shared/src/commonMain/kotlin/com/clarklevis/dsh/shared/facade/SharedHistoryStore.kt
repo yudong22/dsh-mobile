@@ -21,6 +21,25 @@ data class SharedHistoryBootstrap(
     val eventsBySession: Map<String, List<SessionEvent>> = emptyMap()
 )
 
+/**
+ * 会话正文离线缓存的 payload。
+ *
+ * 放在 shared 而非平台层，因为 androidApp 未应用 kotlinx.serialization 插件；
+ * 且它是两端共用的跨进程形状。schema 放进内容，不匹配时平台/投影直接当作 cache miss。
+ */
+@Serializable
+data class SharedConversationCachePayload(
+    val schema: Int = CONVERSATION_CACHE_SCHEMA,
+    val sessionId: String,
+    val lastSequence: Int,
+    val hasMore: Boolean = false,
+    val events: List<SessionEvent> = emptyList()
+) {
+    companion object {
+        const val CONVERSATION_CACHE_SCHEMA = 1
+    }
+}
+
 @Serializable
 data class SharedHistoryEventPatch(
     val kind: String,

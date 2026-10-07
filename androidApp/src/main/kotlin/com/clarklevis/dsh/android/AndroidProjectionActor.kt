@@ -156,6 +156,36 @@ internal class AndroidProjectionActor(
         afterPublish()
     }
 
+    /**
+     * 会话列表缓存的导出/恢复入口。与正文缓存同理必须在 `mutationLock` 内执行：
+     * `mobileStore` 由后台 gateway dispatcher 写入，而这两个入口从 Main 调用。
+     */
+    suspend fun exportSessionCache(): String = mutationLock.withLock {
+        projection.exportSessionCache()
+    }
+
+    suspend fun restoreSessionCache(sessionsJson: String): SharedMobileSnapshot =
+        mutationLock.withLock {
+            projection.restoreSessionCache(sessionsJson)
+        }
+
+    /**
+     * 会话正文缓存的导出/恢复入口。两者都必须在 `mutationLock` 内执行：投影状态
+     * （historyEvents / conversationItems / 水位）由后台 gateway dispatcher 持有，
+     * 绕过锁会让缓存恢复与并发投影互相踩踏。
+     */
+    suspend fun exportConversationCache(sessionId: String): String? = mutationLock.withLock {
+        flushPendingStreamingFrameLocked()
+        projection.exportConversationCache(sessionId)
+    }
+
+    /**
+     * 恢复后必须经 `mutate` 发布：`publishMutationLocked` 会切到 uiDispatcher，
+     * 而 `snapshot` 是 Compose state，只能在 Main 上提交（否则可能漏掉重组）。
+     */
+    suspend fun restoreConversationCache(sessionId: String, payload: String) =
+        mutate { projection.restoreConversationCache(sessionId, payload) }
+
     fun resetImmediate(afterPublish: () -> Unit = {}) {
         publish(projection.reset(), false)
         afterPublish()

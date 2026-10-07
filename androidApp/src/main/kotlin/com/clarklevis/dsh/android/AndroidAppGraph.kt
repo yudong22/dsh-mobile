@@ -2,6 +2,7 @@ package com.clarklevis.dsh.android
 
 import android.app.Application
 import com.clarklevis.dsh.android.platform.AndroidAttachmentCache
+import com.clarklevis.dsh.android.platform.AndroidConversationCache
 import com.clarklevis.dsh.android.platform.AndroidAttachmentThumbnailer
 import com.clarklevis.dsh.android.platform.AndroidGatewayClock
 import com.clarklevis.dsh.android.platform.AndroidGatewayCredentialStore
@@ -14,6 +15,7 @@ import com.clarklevis.dsh.shared.gateway.GatewayRuntime
 import com.clarklevis.dsh.shared.protocol.GatewayFrame
 import com.clarklevis.dsh.shared.protocol.GatewayWireDecoder
 import com.clarklevis.dsh.shared.platform.GatewayAttachmentCache
+import com.clarklevis.dsh.shared.platform.GatewayConversationCache
 import com.clarklevis.dsh.shared.platform.GatewayClock
 import com.clarklevis.dsh.shared.platform.GatewayCredentialStore
 import com.clarklevis.dsh.shared.platform.GatewayNetworkMonitor
@@ -30,6 +32,7 @@ class AndroidAppGraph(
     preferencesOverride: GatewayPreferences? = null,
     credentialStoreOverride: GatewayCredentialStore? = null,
     attachmentCacheOverride: GatewayAttachmentCache? = null,
+    conversationCacheOverride: GatewayConversationCache? = null,
     networkMonitorOverride: GatewayNetworkMonitor? = null,
     clockOverride: GatewayClock? = null,
     frameDecoderOverride: ((String) -> GatewayFrame)? = null,
@@ -48,6 +51,9 @@ class AndroidAppGraph(
         credentialStoreOverride ?: AndroidGatewayCredentialStore(application)
     val attachmentCache: GatewayAttachmentCache =
         attachmentCacheOverride ?: AndroidAttachmentCache(application, gatewayId = gatewayLocalId)
+    /** 会话正文离线缓存；连接建立前先用它呈现本地对话内容。 */
+    val conversationCache: GatewayConversationCache =
+        conversationCacheOverride ?: AndroidConversationCache(application, gatewayId = gatewayLocalId)
     val attachmentThumbnailer = AndroidAttachmentThumbnailer()
     val imagePreprocessor = AndroidImagePreprocessor(application.contentResolver)
     internal val agentNotifications by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {

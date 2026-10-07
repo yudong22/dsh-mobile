@@ -38,8 +38,31 @@ import com.clarklevis.dsh.shared.protocol.GatewayWireDecoder
 import com.clarklevis.dsh.shared.protocol.JsonValue
 import com.clarklevis.dsh.shared.protocol.SessionEvent
 import com.clarklevis.dsh.shared.protocol.wireJson
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlin.time.Clock
+
+/** 会话列表的平台落盘形态；schema 放进 payload，便于日后直接丢弃不兼容缓存。 */
+@Serializable
+data class SharedSessionCacheSnapshot(
+    val schema: Int = 1,
+    val sessions: List<SharedSessionCacheEntry> = emptyList(),
+    val selectedSessionId: String? = null,
+    val archivedSessionIds: List<String> = emptyList()
+)
+
+/** 不含 `isRunning`：运行态必须由宿主确认，缓存值不可信。 */
+@Serializable
+data class SharedSessionCacheEntry(
+    val id: String,
+    val title: String,
+    val lastActivityEpochSeconds: Double,
+    val hasUnread: Boolean = false,
+    val agentPreset: String? = null,
+    val hasConversation: Boolean? = null
+)
 
 data class SharedMobileSnapshot(
     val sessions: List<SessionSummary> = emptyList(),
@@ -453,6 +476,56 @@ class SharedMobileStore(
         acceptFrame("""{"sessionId":"android-demo","seq":2,"time":1786937353,"event":{"type":"assistant/chunk","turn":1,"step":1,"chunkType":"text-delta","text":"共享协议解码、"}}""")
         acceptFrame("""{"sessionId":"android-demo","seq":3,"time":1786937354,"event":{"type":"assistant/chunk","turn":1,"step":1,"chunkType":"text-delta","text":"Reducer 与投影已接入。"}}""")
         acceptFrame("""{"kind":"question-requested","rpcId":"android-question","sessionId":"android-demo","replay":false,"questions":[{"id":"result","question":"人工测试是否通过？","options":[{"label":"通过"},{"label":"需要修复"}]}]}""")
+        return makeSnapshot()
+    }
+
+    /**
+     * 导出可落盘的会话列表缓存。平台层负责实际 I/O；这里只产出稳定快照。
+     * 不含 `isRunning`：进程重启后运行态必须由宿主确认，缓存值会误导在线指示灯
+     * （由 [restoreSessions] 统一清零）。
+     */
+    fun exportSessionCache(): String = wireJson.encodeToString(
+        SharedSessionCacheSnapshot(
+            sessions = sessionListState.sessions.map { session ->
+                SharedSessionCacheEntry(
+                    id = session.id,
+                    title = session.title,
+                    lastActivityEpochSeconds = session.lastActivityEpochSeconds,
+                    hasUnread = session.hasUnread,
+                    agentPreset = session.agentPreset,
+                    hasConversation = session.hasConversation
+                )
+            },
+            selectedSessionId = sessionListState.selectedSessionId,
+            archivedSessionIds = sessionListState.archivedSessionIds.sorted()
+        )
+    )
+
+    /**
+     * 用缓存快照作为冷启动种子。这是**非网络基线**：只填充列表与选中态，
+     * 不发送任何 effect；连接建立后由宿主的 `sessions` 帧按全量替换语义覆盖。
+     */
+    fun restoreSessions(snapshotJson: String?): SharedMobileSnapshot {
+        if (snapshotJson.isNullOrBlank()) return makeSnapshot()
+        val restored = runCatching {
+            wireJson.decodeFromString<SharedSessionCacheSnapshot>(snapshotJson)
+        }.getOrNull() ?: return makeSnapshot()
+        sessionListState = SessionListState(
+            sessions = restored.sessions.map { entry ->
+                SessionSummary(
+                    id = entry.id,
+                    title = entry.title,
+                    lastActivityEpochSeconds = entry.lastActivityEpochSeconds,
+                    // 运行态不可信：必须等宿主 sessions 帧确认。
+                    isRunning = false,
+                    hasUnread = entry.hasUnread,
+                    agentPreset = entry.agentPreset,
+                    hasConversation = entry.hasConversation
+                )
+            },
+            archivedSessionIds = restored.archivedSessionIds.toSet(),
+            selectedSessionId = restored.selectedSessionId
+        )
         return makeSnapshot()
     }
 

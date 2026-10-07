@@ -112,6 +112,31 @@ interface GatewayAttachmentCache {
     suspend fun removeExpired()
 }
 
+/**
+ * 会话正文（规范化 SessionEvent 基线）的平台缓存。
+ *
+ * 与 [GatewayPreferences] / [GatewayAttachmentCache] 并列：**磁盘 I/O 由平台实现**，
+ * 合并、水位与去重规则仍在 KMP。用于「连接建立前先展示本地对话内容」，
+ * 连接成功后由宿主 history/session-snapshot 覆盖（全量替换语义）。
+ *
+ * 契约要点：
+ * - 写入必须原子（避免半截 JSON 被当成有效缓存）；
+ * - 失效按体积 + 条数限额，**不用短 TTL**（宁可看到略旧内容，也不要打开就是空会话）；
+ * - 是派生缓存，schema 不匹配直接当作 miss 丢弃即可。
+ */
+interface GatewayConversationCache {
+    /** 返回该会话的缓存 payload（KMP 定义的 schema）；无缓存或已淘汰时返回 null。 */
+    suspend fun read(sessionId: String): String?
+
+    /** 原子写入；任一环节失败返回 false，调用方不得据此认为已持久化。 */
+    suspend fun write(sessionId: String, payload: String): Boolean
+
+    suspend fun remove(sessionId: String)
+
+    /** 按体积 + 条数限额淘汰旧条目。 */
+    suspend fun removeExpired()
+}
+
 interface GatewayClock {
     fun nowEpochMilliseconds(): Long
     suspend fun delay(milliseconds: Long)

@@ -1,6 +1,7 @@
 package com.clarklevis.dsh.android
 
 import com.clarklevis.dsh.shared.facade.SharedConversationBootstrap
+import com.clarklevis.dsh.shared.facade.SharedConversationCachePayload
 import com.clarklevis.dsh.shared.facade.SharedConversationPatch
 import com.clarklevis.dsh.shared.facade.SharedConversationStore
 import com.clarklevis.dsh.shared.facade.SharedHistoryBootstrap
@@ -40,6 +41,11 @@ internal class AndroidGatewayProjection(
         HistorySyncConfiguration(pagesPerBatch = 1)
     ),
     private val conversationStore: SharedConversationStore = SharedConversationStore(mobileConversationLabels()),
+    /**
+     * 历史基线变化后的落盘回调。只在基线/终态触发，绝不每 token 触发；
+     * 磁盘 I/O 由平台层完成，KMP/投影不做 I/O。
+     */
+    private val onConversationBaselineChanged: (String) -> Unit = {},
     private val onResubscribe: (String) -> Unit = {},
     private val onHistoryPageRequested: (sessionId: String, beforeSequence: Int?, historyFormatVersion: Int?) -> Unit = { _, _, _ -> }
 ) {
@@ -67,6 +73,61 @@ internal class AndroidGatewayProjection(
     private val conversationEnvelope = MviEnvelopeValidator("conversation")
     private val historySubscription = historyStore.subscribe(::acceptHistoryMviEvent)
     private val conversationSubscription = conversationStore.subscribe(::acceptConversationMviEvent)
+
+    /** 导出/恢复会话列表缓存；平台层负责实际磁盘 I/O。 */
+    fun exportSessionCache(): String = mobileStore.exportSessionCache()
+
+    fun restoreSessionCache(sessionsJson: String): SharedMobileSnapshot {
+        controlSnapshot = mobileStore.restoreSessions(sessionsJson)
+        return snapshot()
+    }
+
+    /**
+     * 导出该会话的规范化事件基线供平台落盘。只在已有基线时导出；空列表返回 null，
+     * 避免用空缓存覆盖掉磁盘上仍可用的历史。
+     */
+    fun exportConversationCache(sessionId: String): String? {
+        val records = historyEvents[sessionId].orEmpty()
+        if (records.isEmpty()) return null
+        return adapterJson.encodeToString(SharedConversationCachePayload(
+            schema = SharedConversationCachePayload.CONVERSATION_CACHE_SCHEMA,
+            sessionId = sessionId,
+            lastSequence = historyLastSequences[sessionId] ?: records.last().seq,
+            hasMore = historyHasMore[sessionId] == true,
+            events = records
+        ))
+    }
+
+    /**
+     * 用本地缓存作为**非网络基线**：走与 `session-snapshot` 相同的原子安装路径
+     * （`installSnapshot` + `replaceSession`），因此投影与 conversation 不会分叉。
+     *
+     * 关键约束：水位**不得高于**缓存事件尾 seq，否则 `history` 的 `replace` 单调性校验
+     * 会失败并使该 domain 永久 fail-closed。
+     */
+    fun restoreConversationCache(sessionId: String, payload: String): SharedMobileSnapshot {
+        val cached = runCatching {
+            adapterJson.decodeFromString<SharedConversationCachePayload>(payload)
+        }.getOrNull() ?: return snapshot()
+        if (cached.schema != SharedConversationCachePayload.CONVERSATION_CACHE_SCHEMA || cached.sessionId != sessionId) return snapshot()
+        if (cached.events.isEmpty()) return snapshot()
+        require(cached.events.all { it.sessionId == sessionId }) { "缓存包含其他 session 的事件" }
+        val tail = cached.events.last().seq
+        historyStore.clearSession(sessionId)
+        conversationStore.clearSession(sessionId)
+        historyEvents[sessionId] = cached.events
+        // 水位取「缓存事件尾 seq」与「缓存记录值」的较小者，杜绝倒退。
+        historyLastSequences[sessionId] = minOf(tail, cached.lastSequence)
+        historyHasMore[sessionId] = cached.hasMore
+        historyStore.installSnapshot(
+            sessionId,
+            adapterJson.encodeToString(cached.events),
+            cached.hasMore,
+            null
+        )
+        conversationStore.replaceSession(sessionId, adapterJson.encodeToString(cached.events))
+        return snapshot()
+    }
 
     fun snapshot(): SharedMobileSnapshot {
         val approvalDetails = controlSnapshot.pendingApprovals.mapNotNull { request ->
@@ -419,6 +480,10 @@ internal class AndroidGatewayProjection(
         historyPendingSessionId = plan.pendingSessionId
         historyEnvelope.commit(event)
         if (event.kind == "error") lastError = event.errorCode ?: "history-store-error"
+        // 基线/分页落地后写一次缓存；不含每 token 路径。
+        if (event.kind != "error") {
+            plan.eventsBySession.keys.forEach(onConversationBaselineChanged)
+        }
         plan.effects.forEach { effect ->
             runCatching { onHistoryPageRequested(effect.sessionId, effect.beforeSequence, assistantStream.formatVersion(effect.sessionId)) }
                 .onFailure { lastError = "history-effect-failed" }

@@ -8,6 +8,49 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SharedMobileStoreTest {
+    /** 冷启动缓存：导出再恢复应保留列表与选中态，且运行态一律清零。 */
+    @Test
+    fun sessionCacheRoundTripRestoresListAndClearsRunningState() {
+        val store = SharedMobileStore(nowEpochSeconds = { 1_800_000_000.0 })
+        store.acceptFrame("""{"kind":"event","sessionId":"s1","seq":1,"time":1800000000,"event":{"type":"turn/start","turn":1}}""")
+        store.selectSession("s1")
+        assertTrue(store.snapshot().sessions.single().isRunning)
+
+        val cache = store.exportSessionCache()
+
+        // 新进程：内存为空，用缓存播种。
+        val cold = SharedMobileStore()
+        assertTrue(cold.snapshot().sessions.isEmpty())
+        val restored = cold.restoreSessions(cache)
+        assertEquals(listOf("s1"), restored.sessions.map { it.id })
+        assertEquals("s1", restored.selectedSessionId)
+        // 运行态不可信，必须等宿主 sessions 帧确认。
+        assertTrue(restored.sessions.none { it.isRunning })
+    }
+
+    /** 空/损坏缓存必须安全降级为空列表，不能抛异常打断冷启动。 */
+    @Test
+    fun sessionCacheRestoreToleratesMissingOrCorruptPayload() {
+        val store = SharedMobileStore()
+        assertTrue(store.restoreSessions(null).sessions.isEmpty())
+        assertTrue(store.restoreSessions("").sessions.isEmpty())
+        assertTrue(store.restoreSessions("not-json").sessions.isEmpty())
+    }
+
+    /** 宿主 sessions 帧必须按全量替换语义覆盖缓存（已删除的会话不得残留）。 */
+    @Test
+    fun remoteSessionsFrameReplacesCachedList() {
+        val store = SharedMobileStore()
+        store.restoreSessions(
+            """{"schema":1,"sessions":[{"id":"gone","title":"Gone","lastActivityEpochSeconds":1.0}],"selectedSessionId":"gone","archivedSessionIds":[]}"""
+        )
+        assertEquals(listOf("gone"), store.snapshot().sessions.map { it.id })
+
+        val snapshot = store.acceptFrame(
+            """{"kind":"sessions","items":[{"sessionId":"kept","cwd":"/tmp/kept","updatedAt":1800000000,"running":false,"blank":false}]}"""
+        )
+        assertEquals(listOf("kept"), snapshot.sessions.map { it.id })
+    }
     @Test
     fun facadeNormalizesWireKindForPlatformAdapters() {
         assertEquals(

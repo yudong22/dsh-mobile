@@ -42,6 +42,50 @@ class AndroidGatewayProjectionTest {
         projection.close()
     }
 
+    /**
+     * 离线缓存：导出的基线在新实例里恢复后，对话内容与水位都必须可用，
+     * 且后续 live 事件能继续推进（不能因为水位设错而 fail-closed）。
+     */
+    @Test
+    fun conversationCacheRoundTripRestoresContentAndKeepsWatermarkUsable() {
+        val source = AndroidGatewayProjection()
+        source.selectSession("s")
+        fun accept(p: AndroidGatewayProjection, raw: String) =
+            p.acceptFrame(raw, GatewayWireDecoder.decode(raw), "s")
+        accept(source, """{"kind":"history","sessionId":"s","events":[
+            {"type":"user/message","seq":1,"time":100,"data":{"content":[{"type":"text","text":"你好"}]}},
+            {"type":"assistant/message","seq":2,"time":101,"data":{"message":{"content":[{"type":"text","text":"在的"}]}}}
+        ],"hasMore":false}""")
+        assertEquals(listOf("你好", "在的"), source.snapshot().conversation.map { it.text })
+        val payload = source.exportConversationCache("s")
+        assertTrue(payload != null)
+        source.close()
+
+        // 冷启动：新实例先恢复缓存，再接收 live 事件。
+        val cold = AndroidGatewayProjection()
+        cold.selectSession("s")
+        cold.restoreConversationCache("s", requireNotNull(payload))
+        assertEquals(listOf("你好", "在的"), cold.snapshot().conversation.map { it.text })
+
+        // 水位必须允许更高 seq 的 live 事件继续推进。
+        accept(cold, """{"kind":"event","sessionId":"s","seq":3,"time":102,"event":{"type":"assistant/chunk","turn":1,"step":1,"chunkType":"text-delta","text":"!"}}""")
+        assertEquals(null, cold.snapshot().lastError)
+        cold.close()
+    }
+
+    /** 损坏或不匹配的缓存必须安全忽略，不能污染会话或触发 fail-closed。 */
+    @Test
+    fun conversationCacheRejectsCorruptAndForeignPayloads() {
+        val projection = AndroidGatewayProjection()
+        projection.selectSession("s")
+        projection.restoreConversationCache("s", "not-json")
+        projection.restoreConversationCache("s", """{"schema":99,"sessionId":"s","lastSequence":1,"events":[]}""")
+        projection.restoreConversationCache("s", """{"schema":1,"sessionId":"other","lastSequence":1,"events":[]}""")
+        assertTrue(projection.snapshot().conversation.isEmpty())
+        assertEquals(null, projection.snapshot().lastError)
+        projection.close()
+    }
+
     @Test
     fun assistantChunkBypassesLegacyFullConversationProjection() {
         val projection = AndroidGatewayProjection()
