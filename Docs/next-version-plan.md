@@ -293,3 +293,26 @@
 - 更正 A6 量级（`clear/putAll` 为 O(#sessions)，非 O(#items)）。
 - 记录并修复构建阻塞（§4.1）。
 - 补充 Android 绕过 `SharedQuestionStore` 的既有缺陷。
+
+## 9. CI 覆盖
+
+本仓（含上游 `Clarklevis1995/dsh-mobile`）此前**没有任何 workflow**，push 不会触发构建。
+已新增 `.github/workflows/android.yml`，在 `ubuntu-latest` 上跑：
+
+```
+:shared:testAndroidHostTest :androidApp:testDebugUnitTest :androidApp:lintDebug :androidApp:assembleDebug
+```
+
+关键取舍：
+
+- `shared` 原先只有 **iOS 测试目标**（`iosX64Test` / `iosSimulatorArm64Test`），
+  而 Kotlin/Native 的 iOS target **无法在 Linux 上编译**——这意味着 23 个 `commonTest`
+  文件（含本轮的缓存、提问校验、流式折叠测试）在 CI 上完全不被执行。
+  已在 `shared/build.gradle.kts` 打开 `withHostTest {}`，新增 `:shared:testAndroidHostTest`
+  在 JVM 上跑同一套 `commonTest`（实测 22 个测试类 / 225 个测试，0 失败），
+  因此 ubuntu runner 现在能覆盖 KMP 业务逻辑。
+- 仍**未**被 CI 覆盖的部分：iOS target 自身的编译与测试（需 macOS runner），
+  以及任何真机 / instrumented 测试。
+- 本机 `settings.gradle.kts` / `gradle-wrapper.properties` 的国内镜像属未提交的本地改动；
+  仓库中的配置只有 `mavenCentral()` + `google()`，CI 上可直接拉取依赖。
+
