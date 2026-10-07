@@ -5,7 +5,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +34,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -79,8 +77,8 @@ internal fun WorkspaceSelectionMenu(
     onAddWorkspace: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val dark = isSystemInDarkTheme()
-    val foreground = if (dark) Color(0xFFF2F5FA) else Color(0xFF10141A)
+    val palette = dshPalette()
+    val foreground = palette.textPrimary
     val effectiveSelection = resolveWorkspaceSelection(selectedWorkspaceId, workspaces)
     DropdownMenu(
         expanded = expanded,
@@ -90,13 +88,10 @@ internal fun WorkspaceSelectionMenu(
             .testTag("workspace-menu"),
         offset = DpOffset(14.dp, (-8).dp),
         shape = RoundedCornerShape(24.dp),
-        containerColor = if (dark) Color(0xF0222A35) else Color(0xF0E6ECF4),
+        containerColor = palette.surface,
         tonalElevation = 0.dp,
         shadowElevation = 18.dp,
-        border = BorderStroke(
-            0.8.dp,
-            if (dark) Color.White.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.82f)
-        )
+        border = BorderStroke(1.dp, palette.cardBorder)
     ) {
         WorkspaceMenuItem(
             title = "未分组",
@@ -113,7 +108,7 @@ internal fun WorkspaceSelectionMenu(
         if (workspaces.isNotEmpty()) {
             HorizontalDivider(
                 Modifier.padding(horizontal = 16.dp),
-                color = foreground.copy(alpha = 0.11f)
+                color = palette.divider
             )
         }
 
@@ -132,7 +127,7 @@ internal fun WorkspaceSelectionMenu(
 
         HorizontalDivider(
             Modifier.padding(horizontal = 16.dp),
-            color = foreground.copy(alpha = 0.11f)
+            color = palette.divider
         )
         WorkspaceMenuItem(
             title = "添加工作区",
@@ -154,6 +149,7 @@ private fun WorkspaceMenuItem(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val palette = dshPalette()
     DropdownMenuItem(
         text = {
             Text(
@@ -171,14 +167,14 @@ private fun WorkspaceMenuItem(
         leadingIcon = {
             when (icon) {
                 WorkspaceMenuIcon.Selected -> Box(
-                    Modifier.size(22.dp).background(foreground, CircleShape),
+                    Modifier.size(22.dp).background(palette.accent, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Image(
                         painter = androidx.compose.ui.res.painterResource(R.drawable.ic_menu_check),
                         contentDescription = null,
                         modifier = Modifier.size(15.dp),
-                        colorFilter = ColorFilter.tint(if (foreground.luminance() > 0.5f) Color.Black else Color.White)
+                        colorFilter = ColorFilter.tint(palette.surface)
                     )
                 }
                 WorkspaceMenuIcon.Ungrouped -> MenuVectorIcon(R.drawable.ic_workspace_tray, foreground)
@@ -208,10 +204,10 @@ internal fun WorkspaceDirectoryBrowserSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val listState = rememberLazyListState()
-    val dark = isSystemInDarkTheme()
-    val sheetBackground = if (dark) Color(0xFF171A20) else Color(0xFFF3F3F8)
-    val cardBackground = if (dark) Color(0xFF22262D) else Color.White
-    val foreground = MaterialTheme.colorScheme.onSurface
+    val palette = dshPalette()
+    val sheetBackground = palette.canvas
+    val cardBackground = palette.surface
+    val foreground = palette.textPrimary
     var showCreateDirectoryPrompt by rememberSaveable { mutableStateOf(false) }
     var newDirectoryName by rememberSaveable { mutableStateOf("") }
     var creatingWorkspacePath by rememberSaveable { mutableStateOf<String?>(null) }
@@ -252,7 +248,7 @@ internal fun WorkspaceDirectoryBrowserSheet(
             BottomSheetDefaults.DragHandle(
                 width = 38.dp,
                 height = 5.dp,
-                color = foreground.copy(alpha = 0.30f)
+                color = palette.textTertiary
             )
         },
         modifier = Modifier.testTag("directory-browser-sheet")
@@ -278,13 +274,13 @@ internal fun WorkspaceDirectoryBrowserSheet(
             Column(Modifier.padding(horizontal = 22.dp)) {
                 Text(
                     "当前目录",
-                    color = foreground.copy(alpha = 0.52f),
+                    color = palette.textSecondary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
                     stateHolder.directoryPath ?: "正在读取…",
-                    color = foreground.copy(alpha = 0.40f),
+                    color = palette.textTertiary,
                     fontSize = 13.sp,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
@@ -308,7 +304,7 @@ internal fun WorkspaceDirectoryBrowserSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                            Text("正在读取远程目录…", color = foreground.copy(alpha = 0.58f))
+                            Text("正在读取远程目录…", color = palette.textSecondary)
                         }
                     }
                 } else {
@@ -397,6 +393,7 @@ private fun DirectoryBrowserHeader(
     onCreateDirectory: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val palette = dshPalette()
     Box(
         Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 18.dp),
         contentAlignment = Alignment.Center
@@ -409,7 +406,7 @@ private fun DirectoryBrowserHeader(
                 .align(Alignment.CenterStart)
                 .size(48.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+                .background(palette.surface)
                 .testTag("create-directory")
         ) {
             Box(contentAlignment = Alignment.TopEnd) {
@@ -417,13 +414,14 @@ private fun DirectoryBrowserHeader(
                     painter = androidx.compose.ui.res.painterResource(R.drawable.ic_folder_outline),
                     contentDescription = "新建文件夹",
                     modifier = Modifier.size(26.dp),
-                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface)
+                    colorFilter = ColorFilter.tint(palette.textPrimary)
                 )
                 Box(
-                    Modifier.size(11.dp).background(MaterialTheme.colorScheme.surface, CircleShape),
+                    Modifier.size(11.dp).background(palette.surface, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("+", fontSize = 11.sp, lineHeight = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("+", fontSize = 11.sp, lineHeight = 11.sp, fontWeight = FontWeight.Bold,
+                        color = palette.textPrimary)
                 }
             }
         }
@@ -433,9 +431,9 @@ private fun DirectoryBrowserHeader(
                 .align(Alignment.CenterEnd)
                 .height(48.dp)
                 .clip(RoundedCornerShape(24.dp))
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+                .background(palette.surface)
         ) {
-            Text("取消", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp)
+            Text("取消", color = palette.textPrimary, fontSize = 16.sp)
         }
     }
 }
@@ -453,11 +451,12 @@ private fun DirectoryRow(
     onClick: () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val foreground = MaterialTheme.colorScheme.onSurface
+    val palette = dshPalette()
+    val foreground = palette.textPrimary
     val rowModifier = modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(12.dp))
-        .background(if (highlighted) DshColors.Ocean.copy(alpha = 0.20f) else Color.Transparent)
+        .background(if (highlighted) palette.accent.copy(alpha = 0.12f) else Color.Transparent)
         .clickable(
             enabled = enabled,
             role = Role.Button,
@@ -491,14 +490,14 @@ private fun DirectoryRow(
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(title, color = foreground, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             subtitle?.let {
-                Text(it, color = foreground.copy(alpha = 0.46f), fontSize = 12.sp)
+                Text(it, color = palette.textTertiary, fontSize = 12.sp)
             }
         }
         Image(
             painter = androidx.compose.ui.res.painterResource(R.drawable.ic_chevron_right),
             contentDescription = null,
             modifier = Modifier.size(18.dp),
-            colorFilter = ColorFilter.tint(DshColors.Mist.copy(alpha = 0.88f))
+            colorFilter = ColorFilter.tint(palette.textTertiary)
         )
     }
 }
@@ -508,7 +507,7 @@ private fun DirectoryDivider() {
     HorizontalDivider(
         Modifier.padding(start = 58.dp),
         thickness = 0.6.dp,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+        color = dshPalette().divider
     )
 }
 
@@ -520,10 +519,14 @@ private fun DirectoryCreateWorkspaceBar(
     directoryIsLoading: Boolean,
     onCreateWorkspace: (String) -> Unit
 ) {
+    val palette = dshPalette()
     val enabled = path != null &&
         !workspaceCreationIsLoading &&
         !directoryCreationIsLoading &&
         !directoryIsLoading
+    // 主操作块：启用时用主文字色块 + 卡片色前景，禁用时退回次级面 + 次级文字，避免浅底白字。
+    val barBackground = if (enabled) palette.textPrimary else palette.surfaceMuted
+    val barForeground = if (enabled) palette.surface else palette.textSecondary
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -532,7 +535,7 @@ private fun DirectoryCreateWorkspaceBar(
         path?.let {
             Text(
                 it,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
+                color = palette.textTertiary,
                 fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
@@ -544,7 +547,7 @@ private fun DirectoryCreateWorkspaceBar(
                 .fillMaxWidth()
                 .height(52.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black)
+                .background(barBackground)
                 .clickable(enabled = enabled, role = Role.Button) { path?.let(onCreateWorkspace) }
                 .testTag("create-workspace"),
             horizontalArrangement = Arrangement.Center,
@@ -553,7 +556,7 @@ private fun DirectoryCreateWorkspaceBar(
             if (workspaceCreationIsLoading) {
                 CircularProgressIndicator(
                     Modifier.size(19.dp),
-                    color = Color.White,
+                    color = barForeground,
                     strokeWidth = 2.dp
                 )
             } else {
@@ -561,20 +564,17 @@ private fun DirectoryCreateWorkspaceBar(
                     painter = androidx.compose.ui.res.painterResource(R.drawable.ic_add),
                     contentDescription = null,
                     modifier = Modifier.size(21.dp),
-                    colorFilter = ColorFilter.tint(Color.White)
+                    colorFilter = ColorFilter.tint(barForeground)
                 )
             }
             Spacer(Modifier.width(9.dp))
-            Text("在当前目录创建工作区", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("在当前目录创建工作区", color = barForeground, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
         if (directoryCreationIsLoading) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.7.dp)
-                Text("正在创建文件夹…", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.52f), fontSize = 12.sp)
+                Text("正在创建文件夹…", color = palette.textSecondary, fontSize = 12.sp)
             }
         }
     }
 }
-
-private fun Color.luminance(): Float =
-    (red * 0.299f) + (green * 0.587f) + (blue * 0.114f)

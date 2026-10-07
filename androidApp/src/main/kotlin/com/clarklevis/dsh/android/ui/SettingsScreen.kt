@@ -3,7 +3,6 @@ package com.clarklevis.dsh.android.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -46,7 +45,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
@@ -74,8 +72,8 @@ internal fun SettingsScreen(
 ) {
     var showPermissionPicker by remember { mutableStateOf(false) }
     var pendingPermission by remember { mutableStateOf<String?>(null) }
-    val dark = isSystemInDarkTheme()
-    val pageBackground = if (dark) Color(0xFF0D1118) else Color(0xFFF1F1F6)
+    val palette = dshPalette()
+    val pageBackground = palette.canvas
     LaunchedEffect(stateHolder.gatewayState.connection) { stateHolder.refreshProductState() }
     Scaffold(
         topBar = {
@@ -252,7 +250,7 @@ internal fun AgentPresetSelectionScreen(
                 item {
                     Text(
                         text = "ⓘ  ${presetCapabilityText(stateHolder)}",
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.52f),
+                        color = dshPalette().textSecondary,
                         fontSize = 12.sp,
                         lineHeight = 17.sp,
                         modifier = Modifier.padding(top = 4.dp)
@@ -315,7 +313,7 @@ internal fun DefaultModelSelectionScreen(
                                 group.name,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.52f)
+                                color = dshPalette().textSecondary
                             )
                             group.models.forEach { model ->
                                 val selected = stateHolder.snapshot.defaultModel?.let {
@@ -373,8 +371,7 @@ private fun SettingsSelectionScaffold(
     onBack: () -> Unit,
     content: @Composable () -> Unit
 ) {
-    val dark = isSystemInDarkTheme()
-    val background = if (dark) Color(0xFF0D1118) else Color(0xFFF1F1F6)
+    val background = dshPalette().canvas
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -405,7 +402,7 @@ private fun SettingsSelectionHeader(title: String, description: String) {
         Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Text(
             description,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.52f),
+            color = dshPalette().textSecondary,
             fontSize = 14.sp,
             lineHeight = 20.sp
         )
@@ -421,7 +418,7 @@ private fun SettingsLoadingState(label: String) {
     ) {
         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         Spacer(Modifier.width(10.dp))
-        Text(label, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.52f))
+        Text(label, color = dshPalette().textSecondary)
     }
 }
 
@@ -435,7 +432,7 @@ private fun SettingsEmptyState(title: String, description: String) {
         Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         Text(
             description,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.52f),
+            color = dshPalette().textSecondary,
             fontSize = 13.sp,
             lineHeight = 18.sp
         )
@@ -450,6 +447,7 @@ private fun AgentPresetCard(
     onClick: () -> Unit
 ) {
     val shape = RoundedCornerShape(16.dp)
+    val palette = dshPalette()
     val enabled = !selected && !busy && preset.broken != true
     Column(
         modifier = Modifier.fillMaxWidth()
@@ -457,8 +455,7 @@ private fun AgentPresetCard(
             .background(MaterialTheme.colorScheme.surface)
             .border(
                 width = if (selected) 1.5.dp else 1.dp,
-                color = if (selected) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f),
+                color = if (selected) palette.textPrimary else palette.cardBorder,
                 shape = shape
             )
             .clickable(enabled = enabled, onClick = onClick)
@@ -493,7 +490,7 @@ private fun AgentPresetCard(
         if (preset.broken == true) {
             Text(
                 "⚠ 该预设存在配置错误，暂时不能设为默认值",
-                color = Color(0xFFF08A16),
+                color = DshColors.Orange,
                 fontSize = 12.sp
             )
         }
@@ -510,14 +507,14 @@ private fun DefaultModelCard(
     onSelectEffort: (GatewayReasoningEffort) -> Unit
 ) {
     val shape = RoundedCornerShape(16.dp)
+    val palette = dshPalette()
     Column(
         modifier = Modifier.fillMaxWidth()
             .clip(shape)
             .background(MaterialTheme.colorScheme.surface)
             .border(
                 width = if (selected) 1.5.dp else 1.dp,
-                color = if (selected) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f),
+                color = if (selected) palette.textPrimary else palette.cardBorder,
                 shape = shape
             )
             .padding(16.dp),
@@ -563,11 +560,12 @@ private fun DefaultModelCard(
 
 @Composable
 private fun CurrentDefaultBadge() {
+    val palette = dshPalette()
     Text(
         "当前使用",
-        modifier = Modifier.background(Color.Black, RoundedCornerShape(50))
+        modifier = Modifier.background(palette.textPrimary, RoundedCornerShape(50))
             .padding(horizontal = 10.dp, vertical = 5.dp),
-        color = Color.White,
+        color = palette.surface,
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold
     )
@@ -617,17 +615,20 @@ private fun SettingsSection(
     footer: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val cardShape = RoundedCornerShape(22.dp)
+    val palette = dshPalette()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             title,
             modifier = Modifier.padding(start = 20.dp),
             fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.48f)
+            color = palette.textSecondary
         )
         Column(
             Modifier.fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(22.dp))
+                .background(MaterialTheme.colorScheme.surface, cardShape)
+                .border(1.dp, palette.cardBorder, cardShape)
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) { content() }
@@ -637,7 +638,7 @@ private fun SettingsSection(
                 modifier = Modifier.padding(horizontal = 20.dp),
                 fontSize = 12.sp,
                 lineHeight = 18.sp,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.52f)
+                color = palette.textSecondary
             )
         }
     }
@@ -903,6 +904,6 @@ private fun connectionLabel(holder: AndroidSharedStateHolder) = when (holder.gat
 @Composable
 private fun statusColor(holder: AndroidSharedStateHolder) = when (holder.gatewayState.connection) {
     GatewayConnectionState.CONNECTED -> DshColors.Success
-    GatewayConnectionState.FAILED -> Color.Red
+    GatewayConnectionState.FAILED -> DshColors.Danger
     else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
 }

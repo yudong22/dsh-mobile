@@ -22,7 +22,6 @@ import androidx.compose.ui.res.painterResource
 import com.clarklevis.dsh.android.R
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -102,26 +101,27 @@ internal fun GatewaySwitcherBar() {
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var confirmingDelete by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<GatewayProfile?>(null) }
+    val palette = dshPalette()
     Row(
         Modifier
-            .background(Color.White.copy(alpha = 0.09f), RoundedCornerShape(30.dp))
+            .background(palette.surfaceMuted, RoundedCornerShape(30.dp))
             .clickable { expanded = true }
             .padding(horizontal = 11.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        HostIcon(hosts.activeProfile?.server == true, Color.White, Modifier.size(15.dp))
-        Text(hosts.activeProfile?.displayName ?: "选择主机", color = Color.White, fontSize = 12.sp, maxLines = 1)
+        HostIcon(hosts.activeProfile?.server == true, palette.textPrimary, Modifier.size(15.dp))
+        Text(hosts.activeProfile?.displayName ?: "选择主机", color = palette.textPrimary, fontSize = 12.sp, maxLines = 1)
         val activeOnline = hosts.activeId in hosts.onlineIds
         StatusIndicatorDot(
-            color = if (activeOnline) DshColors.Success else Color.Gray,
+            color = if (activeOnline) DshColors.Success else palette.textTertiary,
             modifier = Modifier.size(6.dp),
             glowing = activeOnline
         )
         androidx.compose.foundation.Image(
             painter = androidx.compose.ui.res.painterResource(com.clarklevis.dsh.android.R.drawable.ic_question_chevron_down),
             contentDescription = null,
-            colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White),
+            colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(palette.textSecondary),
             modifier = Modifier.size(14.dp)
         )
     }
@@ -161,7 +161,7 @@ internal fun GatewaySwitcherBar() {
                                 if (!managing) selectedIds = emptySet()
                             },
                             leadingText = if (managing) "完成编辑" else "编辑",
-                            actionColor = Color(0xFFFF3B30)
+                            actionColor = DshColors.Danger
                         )
                         Text(
                             "我的主机",
@@ -202,7 +202,7 @@ internal fun GatewaySwitcherBar() {
                                             end = 16.dp
                                         ),
                                         thickness = 0.5.dp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                                        color = MaterialTheme.colorScheme.outlineVariant
                                     )
                                 }
                             }
@@ -235,7 +235,7 @@ internal fun GatewaySwitcherBar() {
                         hosts.remove(hosts.profiles.filter { it.localId in selectedIds })
                         selectedIds = emptySet()
                         confirmingDelete = false
-                    }) { Text("删除", color = Color.Red) }
+                    }) { Text("删除", color = DshColors.Danger) }
                 },
                 dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("取消") } }
             )
@@ -306,7 +306,7 @@ private fun GatewayHostRow(
                 fontSize = 12.sp,
                 lineHeight = 15.sp,
                 color = if (profile.localId == hosts.activeId) {
-                    DshColors.Ocean
+                    MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
@@ -315,7 +315,7 @@ private fun GatewayHostRow(
         }
         val online = profile.localId in hosts.onlineIds
         StatusIndicatorDot(
-            color = if (online) DshColors.Success else Color.Gray,
+            color = if (online) DshColors.Success else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(8.dp),
             glowing = online
         )
@@ -345,6 +345,7 @@ private fun GatewayHostRow(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GatewayEditor(hosts: AndroidMultiGatewayStore, profile: GatewayProfile?, onDismiss: () -> Unit) {
+    val palette = dshPalette()
     var alias by remember(profile) { mutableStateOf(profile?.alias.orEmpty()) }
     var server by remember(profile) { mutableStateOf(profile?.server == true) }
     var choosingKind by remember(profile) { mutableStateOf(false) }
@@ -417,7 +418,7 @@ private fun GatewayEditor(hosts: AndroidMultiGatewayStore, profile: GatewayProfi
                                 }
                             }
                         )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Row(
                             Modifier.fillMaxWidth().heightIn(min = 52.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -465,10 +466,10 @@ private fun GatewayEditor(hosts: AndroidMultiGatewayStore, profile: GatewayProfi
                                                     transformOrigin = menuOrigin
                                                 },
                                                 shape = RoundedCornerShape(32.dp),
-                                                color = if (isSystemInDarkTheme()) Color(0xFF343840) else Color(0xFFE1E7F0),
+                                                color = palette.surfaceMuted,
                                                 tonalElevation = 0.dp,
                                                 shadowElevation = 8.dp,
-                                                border = BorderStroke(0.6.dp, Color.White.copy(alpha = 0.35f))
+                                                border = BorderStroke(1.dp, palette.cardBorder)
                                             ) {
                                                 Column(Modifier.padding(vertical = 8.dp)) {
                                                     listOf(false, true).forEach { isServer ->
@@ -523,20 +524,18 @@ private fun HostPanelHeader(
     leadingText: String = "取消",
     actionColor: Color = Color.Unspecified
 ) {
-    val buttonBackground = if (isSystemInDarkTheme()) {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
-    } else {
-        Color.White.copy(alpha = 0.16f)
-    }
+    val palette = dshPalette()
+    val buttonBackground = palette.surfaceMuted
+    val buttonContent = palette.textPrimary
     Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
-        Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Text(title, color = palette.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         if (onCancel != null) {
             TextButton(
                 onClick = onCancel,
                 modifier = Modifier.align(Alignment.CenterStart)
                     .background(buttonBackground, CircleShape)
             ) {
-                Text(leadingText, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                Text(leadingText, color = buttonContent, fontSize = 17.sp, fontWeight = FontWeight.Medium)
             }
         }
         if (action != null) {
@@ -545,7 +544,12 @@ private fun HostPanelHeader(
                 modifier = Modifier.align(Alignment.CenterEnd)
                     .background(buttonBackground, CircleShape)
             ) {
-                Text(action, color = actionColor, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    action,
+                    color = if (actionColor == Color.Unspecified) buttonContent else actionColor,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     }
@@ -565,20 +569,23 @@ private fun activeHostFirst(profiles: List<GatewayProfile>, activeId: String?): 
     return listOf(activeProfile) + profiles.filterNot { it.localId == activeId }
 }
 
+/**
+ * 主机面板的主题作用域。面板背景由 [dshFrostedSheet] 提供（浅色下为浅色面板），
+ * 这里只把 Material 语义色对齐到同一套 token，保证浅色面板配深色文字、深色面板配浅色文字。
+ */
 @Composable
 private fun HostPanelTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val ink = if (dark) Color(0xFFF2F2F7) else Color(0xFF1C1C1E)
-    val muted = if (dark) Color(0xFFAEAEB2) else Color(0xFF6C6C70)
-    val background = if (dark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
-    val surface = if (dark) Color(0xFF2C2C2E) else Color.White
-    val base = if (dark) darkColorScheme() else lightColorScheme()
+    val palette = dshPalette()
+    val base = if (palette.isDark) darkColorScheme() else lightColorScheme()
     MaterialTheme(
         colorScheme = base.copy(
-            primary = ink, onPrimary = surface, secondary = ink, onSecondary = surface,
-            background = background, onBackground = ink, surface = surface, onSurface = ink,
-            surfaceVariant = background, onSurfaceVariant = muted, surfaceTint = Color.Transparent,
-            outline = muted, outlineVariant = muted.copy(alpha = 0.25f)
+            primary = palette.primary, onPrimary = Color.White,
+            secondary = palette.accent, onSecondary = Color.White,
+            background = palette.canvas, onBackground = palette.textPrimary,
+            surface = palette.surface, onSurface = palette.textPrimary,
+            surfaceVariant = palette.surfaceMuted, onSurfaceVariant = palette.textSecondary,
+            surfaceTint = Color.Transparent,
+            outline = palette.border, outlineVariant = palette.divider
         ),
         content = content
     )
@@ -604,8 +611,10 @@ private fun HostIcon(server: Boolean, color: Color, modifier: Modifier = Modifie
 }
 
 @Composable
-private fun hostPanelCardColor(): Color =
-    MaterialTheme.colorScheme.onSurface.copy(alpha = if (isSystemInDarkTheme()) 0.09f else 0.06f)
+private fun hostPanelCardColor(): Color {
+    val palette = dshPalette()
+    return if (palette.isDark) palette.surfaceMuted else palette.surface
+}
 
 @Composable
 private fun HostPanelDragHandle() {

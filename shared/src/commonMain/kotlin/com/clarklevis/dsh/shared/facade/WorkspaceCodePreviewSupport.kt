@@ -97,8 +97,11 @@ object WorkspaceCodePreviewSupport {
 
         fun addGroupMatches(regex: Regex, groupIndex: Int, kind: WorkspaceCodeTokenKind) {
             regex.findAll(text).forEach { match ->
-                val range = match.groups[groupIndex]?.range ?: return@forEach
-                addRange(range.first, range.last + 1, kind)
+                val groupValue = match.groups[groupIndex]?.value ?: return@forEach
+                val offset = match.value.indexOf(groupValue)
+                if (offset < 0) return@forEach
+                val start = match.range.first + offset
+                addRange(start, start + groupValue.length, kind)
             }
         }
 
@@ -368,8 +371,8 @@ object WorkspaceCodePreviewSupport {
     private val MARKUP_LANGUAGES = setOf("html", "xml")
 
     private val BASE_TOKEN_PATTERN = Regex(
-        pattern = """<!--.*?-->|/\*.*?\*/|//[^\n]*|--[^\n]*|\#[^\n]*|\"\"\".*?\"\"\"|'''.*?'''|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`""",
-        options = setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.MULTILINE)
+        pattern = """(?s)<!--.*?-->|/\*.*?\*/|//[^\n]*|--[^\n]*|\#[^\n]*|\"\"\".*?\"\"\"|'''.*?'''|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`""",
+        options = setOf(RegexOption.MULTILINE)
     )
     private val CSS_PROPERTY_PATTERN = Regex("(?m)^[ \\t]*([A-Za-z-]+)(?=\\s*:)")
     private val CSS_SELECTOR_PATTERN = Regex("(?m)(?:^|[},])\\s*([.#]?[A-Za-z][A-Za-z0-9_-]*)(?=\\s*[{,])")

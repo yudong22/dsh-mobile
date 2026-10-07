@@ -27,7 +27,6 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -104,7 +103,6 @@ import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -181,6 +179,7 @@ internal fun ConversationScreen(
     onPickImage: () -> Unit,
     onBack: () -> Unit
 ) {
+    val palette = dshPalette()
     val session = stateHolder.snapshot.sessions.firstOrNull { it.id == stateHolder.snapshot.selectedSessionId }
     val title = session?.title ?: "新建 DeepSeek Harness"
     val agentPresetId = stateHolder.sessionAgentPreset.agentPreset
@@ -214,12 +213,13 @@ internal fun ConversationScreen(
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = palette.canvas,
         topBar = {
             TopAppBar(
                 title = {
                     Text(
                         title,
+                        color = palette.textPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         fontSize = 16.sp,
@@ -246,7 +246,7 @@ internal fun ConversationScreen(
                         SmallConnectionDot(stateHolder.gatewayState.connection)
                         Text(
                             agentPresetDisplayName(agentPresetId, agentPresetName),
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            color = palette.textSecondary,
                             fontSize = 12.sp
                         )
                         ConversationMoreMenu(
@@ -307,8 +307,8 @@ internal fun TopBarCircleButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
-    val shadowColor = Color.Black.copy(alpha = if (isDark) 0.24f else 0.075f)
+    val palette = dshPalette()
+    val shadowColor = Color.Black.copy(alpha = if (palette.isDark) 0.24f else 0.07f)
     Box(
         modifier = modifier.size(46.dp)
             .dropShadow(
@@ -321,10 +321,10 @@ internal fun TopBarCircleButton(
                 )
             )
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = if (isDark) 0.82f else 0.94f))
+            .background(palette.surface)
             .border(
                 0.7.dp,
-                MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDark) 0.13f else 0.055f),
+                palette.cardBorder,
                 CircleShape
             )
             .clickable(onClick = onClick)
@@ -335,7 +335,7 @@ internal fun TopBarCircleButton(
             painter = painterResource(iconRes),
             contentDescription = null,
             modifier = Modifier.size(22.dp),
-            tint = MaterialTheme.colorScheme.onSurface
+            tint = palette.textPrimary
         )
     }
 }
@@ -346,6 +346,7 @@ internal fun ConversationMoreMenu(
     onBrowseFiles: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val palette = dshPalette()
     Box {
         TopBarCircleButton(
             iconRes = R.drawable.ic_more_horizontal,
@@ -358,12 +359,12 @@ internal fun ConversationMoreMenu(
             modifier = Modifier.width(228.dp).testTag("conversation-more-menu"),
             offset = DpOffset(x = (-220).dp, y = 8.dp),
             shape = RoundedCornerShape(26.dp),
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+            containerColor = palette.surface,
             tonalElevation = 0.dp,
             shadowElevation = 10.dp,
             border = androidx.compose.foundation.BorderStroke(
                 0.7.dp,
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.055f)
+                palette.cardBorder
             )
         ) {
             ConversationMoreMenuItem(
@@ -389,6 +390,7 @@ private fun ConversationMoreMenuItem(
         text = {
             Text(
                 title,
+                color = dshPalette().textPrimary,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -409,25 +411,26 @@ private fun ConversationMoreMenuItem(
 
 @Composable
 private fun SegmentedControl(selected: Int, onSelect: (Int) -> Unit) {
+    val palette = dshPalette()
     val trackShape = RoundedCornerShape(16.dp)
     val segmentShape = RoundedCornerShape(14.dp)
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 66.dp, vertical = 6.dp)
             .height(32.dp)
             .clip(trackShape)
-            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.075f))
+            .background(palette.surfaceMuted)
             .padding(2.dp)
     ) {
         listOf("对话", "轨迹").forEachIndexed { index, title ->
             val isSelected = selected == index
             Box(
                 Modifier.weight(1f).fillMaxHeight().clip(segmentShape)
-                    .background(if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent)
+                    .background(if (isSelected) palette.surface else Color.Transparent)
                     .then(
                         if (isSelected) {
                             Modifier.border(
                                 0.5.dp,
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.035f),
+                                palette.cardBorder,
                                 segmentShape
                             )
                         } else {
@@ -440,6 +443,7 @@ private fun SegmentedControl(selected: Int, onSelect: (Int) -> Unit) {
             ) {
                 Text(
                     title,
+                    color = if (isSelected) palette.primary else palette.textSecondary,
                     fontSize = 13.sp,
                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                 )
@@ -617,10 +621,11 @@ internal fun HistoryLoadingOverlay(
     loadedEventCount: Int,
     totalEventCount: Int?
 ) {
+    val palette = dshPalette()
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(palette.canvas)
             .testTag("history-loading-overlay"),
         contentAlignment = Alignment.Center
     ) {
@@ -632,18 +637,18 @@ internal fun HistoryLoadingOverlay(
             CircularProgressIndicator(
                 modifier = Modifier.size(44.dp),
                 strokeWidth = 4.dp,
-                color = DshColors.Ocean,
-                trackColor = DshColors.Ocean.copy(alpha = 0.20f)
+                color = palette.primary,
+                trackColor = palette.primary.copy(alpha = 0.20f)
             )
             Text(
                 "正在加载历史记录",
-                color = MaterialTheme.colorScheme.onBackground,
+                color = palette.textPrimary,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
                 historyLoadingProgressText(loadedEventCount, totalEventCount),
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.50f),
+                color = palette.textSecondary,
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center
             )
@@ -656,7 +661,7 @@ private fun ConversationBottomFade(
     contentHeight: Dp,
     modifier: Modifier = Modifier
 ) {
-    val background = MaterialTheme.colorScheme.background
+    val background = dshPalette().canvas
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -862,6 +867,7 @@ private fun ConversationTimeline(
                 }
             }
     }
+    val palette = dshPalette()
     Box(
         Modifier
             .fillMaxSize()
@@ -887,16 +893,23 @@ private fun ConversationTimeline(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Text("历史记录加载失败", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "历史记录加载失败",
+                        color = palette.textPrimary,
+                        style = MaterialTheme.typography.titleLarge
+                    )
                     Text(
                         if (error.contains("refuses this format")) {
                             "Host 无法读取旧格式会话，请修复或升级 Host 后重试。原始记录未修改。"
                         } else error,
+                        color = palette.textSecondary,
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
                         maxLines = 6
                     )
-                    TextButton(onClick = stateHolder::reloadSelectedHistory) { Text("重新加载历史") }
+                    TextButton(onClick = stateHolder::reloadSelectedHistory) {
+                        Text("重新加载历史", color = palette.primary)
+                    }
                 }
             }
         }
@@ -915,9 +928,13 @@ private fun ConversationTimeline(
             if (hasHistoryLoadingRow) {
                 item("history-loading") {
                     Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = palette.primary
+                        )
                         Spacer(Modifier.width(9.dp))
-                        Text("正在加载更早记录…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f))
+                        Text("正在加载更早记录…", fontSize = 12.sp, color = palette.textSecondary)
                     }
                 }
             }
@@ -1050,6 +1067,7 @@ internal fun shouldPublishPinnedState(
 
 @Composable
 internal fun ScrollToBottomButton(isGenerating: Boolean, onClick: () -> Unit) {
+    val palette = dshPalette()
     val shape = CircleShape
     Surface(
         onClick = onClick,
@@ -1059,7 +1077,7 @@ internal fun ScrollToBottomButton(isGenerating: Boolean, onClick: () -> Unit) {
                 shadow = Shadow(
                     radius = 12.dp,
                     spread = 0.dp,
-                    color = Color.Black.copy(alpha = 0.10f),
+                    color = palette.floatingShadow,
                     offset = DpOffset(0.dp, 4.dp)
                 )
             )
@@ -1068,10 +1086,10 @@ internal fun ScrollToBottomButton(isGenerating: Boolean, onClick: () -> Unit) {
             }
             .testTag("scroll-to-bottom"),
         shape = shape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        color = palette.surface,
         border = androidx.compose.foundation.BorderStroke(
             0.7.dp,
-            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f)
+            palette.cardBorder
         )
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1079,14 +1097,14 @@ internal fun ScrollToBottomButton(isGenerating: Boolean, onClick: () -> Unit) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 2.dp,
-                    color = DshColors.Ocean
+                    color = palette.primary
                 )
             } else {
                 Icon(
                     painter = painterResource(R.drawable.ic_arrow_down),
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.onSurface
+                    tint = palette.textPrimary
                 )
             }
         }
@@ -1095,12 +1113,13 @@ internal fun ScrollToBottomButton(isGenerating: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun EmptyConversation(modifier: Modifier = Modifier) {
+    val palette = dshPalette()
     Column(modifier.padding(horizontal = 28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         WhaleIcon(Modifier.width(52.dp).height(39.dp))
-        Text("操作远端 DSH Agent", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text("操作远端 DSH Agent", color = palette.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         Text(
             "发送任务后，工具调用、推理进度和最终回复会通过 Mobile Gateway 实时返回。",
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+            color = palette.textSecondary,
             fontSize = 14.sp,
             textAlign = TextAlign.Center
         )
@@ -1114,11 +1133,12 @@ private fun Composer(
     onPickImage: () -> Unit,
     onDismissInput: () -> Unit
 ) {
-    val shape = RoundedCornerShape(24.dp)
-    val isDark = isSystemInDarkTheme()
-    val shadowColor = dshFloatingSurfaceShadow(isDark)
-    val glassEdge = dshGlassEdge(isDark)
+    val palette = dshPalette()
+    val shape = RoundedCornerShape(28.dp)
+    val shadowColor = palette.floatingShadow
     val composerHasContent = stateHolder.messageDraft.trim().isNotEmpty() || stateHolder.preparedImages.isNotEmpty()
+    // 主操作色块上的前景：浅色主题主色为深蓝，用白；深色主题主色偏亮，改用深色文字保证对比度。
+    val primaryActionForeground = if (palette.isDark) palette.canvas else Color.White
     val keyboardController = LocalSoftwareKeyboardController.current
     val queueEditFocusRequester = remember { FocusRequester() }
     var observedQueueEditCount by remember { mutableStateOf(stateHolder.queueDraftRestoreCount) }
@@ -1174,18 +1194,18 @@ private fun Composer(
                 .dropShadow(
                     shape = shape,
                     shadow = Shadow(
-                        radius = 10.dp,
+                        radius = 14.dp,
                         spread = 0.dp,
                         color = shadowColor,
-                        offset = DpOffset(x = 0.dp, y = 4.dp)
+                        offset = DpOffset(x = 0.dp, y = 3.dp)
                     )
             ),
             shape = shape,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-            border = androidx.compose.foundation.BorderStroke(0.8.dp, glassEdge)
+            color = palette.surface,
+            border = androidx.compose.foundation.BorderStroke(0.8.dp, palette.cardBorder)
         ) {
             Column(
-                Modifier.padding(horizontal = 14.dp).padding(top = 14.dp, bottom = 12.dp),
+                Modifier.padding(horizontal = 16.dp).padding(top = 14.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 if (stateHolder.preparedImages.isNotEmpty()) {
@@ -1213,15 +1233,15 @@ private fun Composer(
                         .onFocusChanged { inputIsFocused = it.isFocused }
                         .focusRequester(queueEditFocusRequester)
                         .testTag("composer-input"),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                    cursorBrush = SolidColor(DshColors.Ocean),
-                    visualTransformation = slashCommandVisualTransformation(commandToken),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = palette.textPrimary),
+                    cursorBrush = SolidColor(palette.primary),
+                    visualTransformation = slashCommandVisualTransformation(commandToken, palette.primary),
                     decorationBox = { field ->
                         Box {
                             if (stateHolder.messageDraft.isEmpty()) {
                                 Text(
                                     "描述你想要构建的内容",
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f)
+                                    color = palette.textTertiary
                                 )
                             } else if (
                                 commandToken != null &&
@@ -1236,7 +1256,7 @@ private fun Composer(
                                         if (!stateHolder.messageDraft.last().isWhitespace()) append(" ")
                                         withStyle(
                                             SpanStyle(
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f)
+                                                color = palette.textTertiary
                                             )
                                         ) {
                                             append(commandHint)
@@ -1270,7 +1290,7 @@ private fun Composer(
                                 } else if (composerHasContent) 1f else 0.48f
                             )
                             .clip(CircleShape)
-                            .background(DshColors.Ocean)
+                            .background(palette.primary)
                             .clickable(
                                 enabled = if (stateHolder.showsSessionStopButton) {
                                     stateHolder.canCancelSelectedSession
@@ -1296,14 +1316,14 @@ private fun Composer(
                             Box(
                                 Modifier.size(14.dp)
                                     .clip(RoundedCornerShape(3.dp))
-                                    .background(Color.White)
+                                    .background(primaryActionForeground)
                             )
                         } else {
                             Icon(
                                 painter = painterResource(R.drawable.ic_arrow_up),
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp),
-                                tint = Color.White
+                                tint = primaryActionForeground
                             )
                         }
                     }
@@ -1326,7 +1346,7 @@ private fun PreparedImagePreview(image: AndroidPreparedImage, onRemove: () -> Un
     Box(
         Modifier.size(width = 82.dp, height = 72.dp)
             .clip(shape)
-            .background(DshColors.Ocean.copy(alpha = 0.11f)),
+            .background(dshPalette().surfaceMuted),
         contentAlignment = Alignment.Center
     ) {
         when (val state = preview) {
@@ -1384,18 +1404,16 @@ internal fun QueueDock(
 ) {
     var expanded by remember(sessionId) { mutableStateOf(false) }
     if (items.isEmpty()) return
+    val palette = dshPalette()
     val actionsEnabled = enabled && pendingItemId == null
     val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     Column(
         Modifier.fillMaxWidth()
             .dropShadow(
                 shape = shape,
-                shadow = Shadow(radius = 8.dp, color = Color.Black.copy(alpha = 0.06f), offset = DpOffset(0.dp, 2.dp))
+                shadow = Shadow(radius = 8.dp, color = palette.floatingShadow, offset = DpOffset(0.dp, 2.dp))
             )
-            .background(
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f).compositeOver(MaterialTheme.colorScheme.surface),
-                shape
-            )
+            .background(palette.surfaceMuted, shape)
             // 底部延伸到输入框圆角后方，按钮保留在输入框外。
             .padding(bottom = 24.dp)
     ) {
@@ -1407,10 +1425,24 @@ internal fun QueueDock(
                 ) { expanded = !expanded }.padding(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(painterResource(R.drawable.ic_question_bubble), contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(16.dp))
-                Text("排队消息 · ${items.size}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                Icon(painterResource(if (expanded) R.drawable.ic_question_chevron_down else R.drawable.ic_chevron_up),
-                    contentDescription = if (expanded) "收起排队消息" else "展开排队消息", modifier = Modifier.size(18.dp))
+                Icon(
+                    painterResource(R.drawable.ic_question_bubble),
+                    contentDescription = null,
+                    modifier = Modifier.padding(end = 6.dp).size(16.dp),
+                    tint = palette.textSecondary
+                )
+                Text(
+                    "排队消息 · ${items.size}",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.textPrimary
+                )
+                Icon(
+                    painterResource(if (expanded) R.drawable.ic_question_chevron_down else R.drawable.ic_chevron_up),
+                    contentDescription = if (expanded) "收起排队消息" else "展开排队消息",
+                    modifier = Modifier.size(18.dp),
+                    tint = palette.textSecondary
+                )
             }
         }
         if (items.size == 1 || expanded) {
@@ -1419,14 +1451,35 @@ internal fun QueueDock(
                     key(item.id) {
                         Row(Modifier.fillMaxWidth().padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (items.size == 1) {
-                                Icon(painterResource(R.drawable.ic_question_bubble), contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Icon(
+                                    painterResource(R.drawable.ic_question_bubble),
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 6.dp).size(16.dp),
+                                    tint = palette.textSecondary
+                                )
                             }
                             Column(Modifier.weight(1f)) {
-                                Text(item.preview, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                                if (item.attachmentCount > 0) Text("${item.attachmentCount} 个附件", style = MaterialTheme.typography.labelSmall)
+                                Text(
+                                    item.preview,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = palette.textPrimary
+                                )
+                                if (item.attachmentCount > 0) {
+                                    Text(
+                                        "${item.attachmentCount} 个附件",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = palette.textTertiary
+                                    )
+                                }
                             }
                             if (pendingItemId == item.id) {
-                                CircularProgressIndicator(Modifier.padding(10.dp).size(20.dp), strokeWidth = 2.dp)
+                                CircularProgressIndicator(
+                                    Modifier.padding(10.dp).size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = palette.primary
+                                )
                             } else {
                                 QueueAction(R.drawable.ic_pencil_line, "编辑排队消息", actionsEnabled && item.editable) { onAction(item.id, "edit") }
                                 QueueAction(R.drawable.ic_trash, "删除排队消息", actionsEnabled) { onAction(item.id, "remove") }
@@ -1437,7 +1490,7 @@ internal fun QueueDock(
                             HorizontalDivider(
                                 modifier = Modifier.padding(horizontal = 10.dp),
                                 thickness = 0.5.dp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+                                color = palette.divider
                             )
                         }
                     }
@@ -1456,7 +1509,7 @@ private fun QueueAction(icon: Int, label: String, enabled: Boolean, onClick: () 
         onClick = onClick
     )
         .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
-        Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(18.dp), tint = dshPalette().textSecondary)
     }
 }
 
@@ -1467,7 +1520,7 @@ private fun SlashCommandMenus(
 ) {
     val state = stateHolder.slashCommands
     if (!state.catalogVisible && state.optionsCommand == null) return
-    val isDark = isSystemInDarkTheme()
+    val palette = dshPalette()
     val shape = RoundedCornerShape(22.dp)
     Surface(
         modifier = modifier
@@ -1476,17 +1529,17 @@ private fun SlashCommandMenus(
             .dropShadow(
                 shape = shape,
                 shadow = Shadow(
-                    radius = 10.dp,
+                    radius = 14.dp,
                     spread = 0.dp,
-                    color = dshFloatingSurfaceShadow(isDark),
+                    color = palette.floatingShadow,
                     offset = DpOffset(x = 0.dp, y = 4.dp)
                 )
             ),
         shape = shape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+        color = palette.surface,
         border = androidx.compose.foundation.BorderStroke(
             0.8.dp,
-            dshGlassEdge(isDark)
+            palette.cardBorder
         )
     ) {
         val optionsCommand = state.optionsCommand
@@ -1499,19 +1552,19 @@ private fun SlashCommandMenus(
             if (optionsCommand != null) {
                 Text(
                     text = "/${optionsCommand.name}",
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.52f),
+                    color = palette.textSecondary,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
                 )
             }
             if (state.catalogLoading || state.optionsLoading || state.selectionLoading) {
-                LinearProgressIndicator(Modifier.fillMaxWidth(), color = DshColors.Ocean)
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = palette.primary)
             }
             if (optionsCommand == null) {
                 state.filteredGroups.forEach { group ->
                     Text(
                         text = group.title,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.64f),
+                        color = palette.textSecondary,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -1523,17 +1576,17 @@ private fun SlashCommandMenus(
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(command.name, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                            Text(command.name, color = palette.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                             Text(
                                 command.description,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.52f),
+                                color = palette.textTertiary,
                                 fontSize = 13.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(start = 10.dp).weight(1f)
                             )
                             if (command.ui.kind == "select") {
-                                Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.56f))
+                                Text("›", color = palette.textTertiary)
                             }
                         }
                     }
@@ -1549,18 +1602,18 @@ private fun SlashCommandMenus(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(option.label, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                            Text(option.label, color = palette.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                             (option.description ?: option.detail)?.let {
                                 Text(
                                     it,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.52f),
+                                    color = palette.textSecondary,
                                     fontSize = 12.sp,
                                     maxLines = 1
                                 )
                             }
                         }
                         if (option.selected == true) {
-                            Text("✓", color = DshColors.Ocean, fontWeight = FontWeight.Bold)
+                            Text("✓", color = palette.primary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1569,10 +1622,10 @@ private fun SlashCommandMenus(
     }
 }
 
-internal fun dshFloatingSurfaceShadow(isDark: Boolean): Color =
-    Color.Black.copy(alpha = if (isDark) 0.20f else 0.08f)
-
-private fun slashCommandVisualTransformation(commandToken: String?): VisualTransformation {
+private fun slashCommandVisualTransformation(
+    commandToken: String?,
+    accentColor: Color
+): VisualTransformation {
     if (commandToken == null) return VisualTransformation.None
     return VisualTransformation { source ->
         val highlightsCommand = source.text == commandToken || source.text.startsWith("$commandToken ")
@@ -1580,7 +1633,7 @@ private fun slashCommandVisualTransformation(commandToken: String?): VisualTrans
             append(source)
             if (highlightsCommand) {
                 addStyle(
-                    SpanStyle(color = DshColors.Ocean, fontWeight = FontWeight.SemiBold),
+                    SpanStyle(color = accentColor, fontWeight = FontWeight.SemiBold),
                     start = 0,
                     end = commandToken.length
                 )
@@ -1589,14 +1642,6 @@ private fun slashCommandVisualTransformation(commandToken: String?): VisualTrans
         TransformedText(transformed, OffsetMapping.Identity)
     }
 }
-
-internal fun dshGlassEdge(isDark: Boolean): Brush = Brush.verticalGradient(
-    colorStops = arrayOf(
-        0f to Color.White.copy(alpha = if (isDark) 0.21f else 0.72f),
-        0.48f to Color.White.copy(alpha = if (isDark) 0.12f else 0.52f),
-        1f to Color.White.copy(alpha = if (isDark) 0.15f else 0.62f)
-    )
-)
 
 @Composable
 private fun ComposerIconButton(iconRes: Int, description: String, onClick: () -> Unit) {
@@ -1608,7 +1653,7 @@ private fun ComposerIconButton(iconRes: Int, description: String, onClick: () ->
             painter = painterResource(iconRes),
             contentDescription = null,
             modifier = Modifier.size(22.dp),
-            tint = MaterialTheme.colorScheme.onSurface
+            tint = dshPalette().textPrimary
         )
     }
 }
@@ -1624,13 +1669,13 @@ internal fun SessionAgentPresetControl(
     val current = state.presets.firstOrNull { it.id == state.agentPreset }
     val retry = !state.loading && !state.saving && (!state.known || !state.catalogLoaded)
     val shape = RoundedCornerShape(13.dp)
-    val isDark = isSystemInDarkTheme()
-    val shadowColor = dshFloatingSurfaceShadow(isDark)
+    val palette = dshPalette()
+    val shadowColor = palette.floatingShadow
     Box {
         Surface(
             shape = shape,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-            border = androidx.compose.foundation.BorderStroke(0.8.dp, dshGlassEdge(isDark)),
+            color = palette.surface,
+            border = androidx.compose.foundation.BorderStroke(0.8.dp, palette.cardBorder),
             modifier = Modifier.testTag("session-agent-preset-capsule")
                 .dropShadow(
                     shape = shape,
@@ -1653,7 +1698,7 @@ internal fun SessionAgentPresetControl(
             ) {
                 Icon(
                     painterResource(R.drawable.ic_agent_mode), contentDescription = null,
-                    modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface
+                    modifier = Modifier.size(16.dp), tint = palette.textPrimary
                 )
                 Text(
                     when {
@@ -1664,6 +1709,7 @@ internal fun SessionAgentPresetControl(
                         else -> "重试模式"
                     },
                     modifier = Modifier.widthIn(max = 132.dp),
+                    color = palette.textPrimary,
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
@@ -1672,7 +1718,7 @@ internal fun SessionAgentPresetControl(
                 )
                 Icon(
                     painterResource(R.drawable.ic_question_chevron_down), contentDescription = "选择会话模式",
-                    modifier = Modifier.size(10.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                    modifier = Modifier.size(10.dp), tint = palette.textTertiary
                 )
             }
         }
@@ -1689,13 +1735,14 @@ internal fun SessionAgentPresetControl(
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
                                 preset.name?.takeIf(String::isNotBlank) ?: agentPresetDisplayName(preset.id),
+                                color = palette.textPrimary,
                                 fontSize = 16.sp, fontWeight = FontWeight.Medium,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 if (preset.broken == true) preset.brokenReason ?: "模式不可用"
                                 else agentPresetCompactDescription(preset.id, preset.description),
-                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                                fontSize = 12.sp, color = palette.textSecondary,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis
                             )
                         }
@@ -1703,7 +1750,8 @@ internal fun SessionAgentPresetControl(
                     trailingIcon = {
                         if (preset.id == state.agentPreset) Icon(
                             painterResource(R.drawable.ic_menu_check), contentDescription = "已选择",
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(18.dp),
+                            tint = palette.primary
                         )
                     },
                     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp),
@@ -1720,6 +1768,7 @@ private fun PermissionControl(
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val palette = dshPalette()
     val selected = stateHolder.snapshot.permissions?.currentValue
         ?: stateHolder.snapshot.permissionDefault
     val options = stateHolder.snapshot.permissions?.options.orEmpty()
@@ -1734,7 +1783,7 @@ private fun PermissionControl(
                 painter = painterResource(permissionIcon(selected)),
                 contentDescription = null,
                 modifier = Modifier.size(14.dp),
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+                tint = palette.textSecondary
             )
             Text(
                 options.firstOrNull { it.value == selected }?.name
@@ -1742,7 +1791,7 @@ private fun PermissionControl(
                     ?: permissionTitle(selected),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                color = palette.textSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1759,6 +1808,7 @@ private fun PermissionControl(
                     text = {
                         Text(
                             option.name,
+                            color = palette.textPrimary,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -1771,7 +1821,7 @@ private fun PermissionControl(
                             ),
                             contentDescription = null,
                             modifier = Modifier.size(22.dp),
-                            tint = MaterialTheme.colorScheme.onSurface
+                            tint = if (option.value == selected) palette.primary else palette.textSecondary
                         )
                     },
                     contentPadding = PaddingValues(horizontal = 18.dp),
@@ -1790,7 +1840,7 @@ private fun ComposerMenuSectionTitle(title: String) {
     Text(
         title,
         modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 9.dp, bottom = 4.dp),
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f),
+        color = dshPalette().textTertiary,
         fontSize = 13.sp,
         fontWeight = FontWeight.Medium
     )
@@ -1798,10 +1848,12 @@ private fun ComposerMenuSectionTitle(title: String) {
 
 @Composable
 private fun ComposerMenuItem(title: String, selected: Boolean, onClick: () -> Unit) {
+    val palette = dshPalette()
     DropdownMenuItem(
         text = {
             Text(
                 title,
+                color = palette.textPrimary,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 2,
@@ -1815,7 +1867,7 @@ private fun ComposerMenuItem(title: String, selected: Boolean, onClick: () -> Un
                 ),
                 contentDescription = null,
                 modifier = Modifier.size(22.dp),
-                tint = MaterialTheme.colorScheme.onSurface
+                tint = if (selected) palette.primary else palette.textSecondary
             )
         },
         contentPadding = PaddingValues(horizontal = 18.dp),
@@ -1834,6 +1886,7 @@ private fun ModelControl(
     val groups = stateHolder.snapshot.modelCatalog?.groups.orEmpty()
     val enabled = stateHolder.snapshot.selectedSessionId != null &&
         groups.isNotEmpty() && stateHolder.snapshot.modelCatalog?.routable != false
+    val palette = dshPalette()
     Box(modifier) {
         Row(
             modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) { expanded = true },
@@ -1845,7 +1898,7 @@ private fun ModelControl(
                 modifier = Modifier.weight(1f),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                color = palette.textSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1856,7 +1909,7 @@ private fun ModelControl(
                 painter = painterResource(R.drawable.ic_chevrons_vertical),
                 contentDescription = null,
                 modifier = Modifier.size(9.dp),
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.30f)
+                tint = palette.textTertiary
             )
         }
         ComposerPopupMenu(
@@ -1881,7 +1934,7 @@ private fun ModelControl(
                 }
                 HorizontalDivider(
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+                    color = palette.divider
                 )
             }
             groups.forEach { group ->
@@ -1918,7 +1971,7 @@ internal fun ReasoningEffortTag(title: String) {
                 RoundedCornerShape(7.dp)
             )
             .padding(horizontal = 6.dp, vertical = 2.dp),
-        color = MaterialTheme.colorScheme.onSurface,
+        color = dshPalette().textPrimary,
         fontSize = 10.sp,
         lineHeight = 11.sp,
         fontWeight = FontWeight.SemiBold,
@@ -1981,18 +2034,19 @@ private fun ComposerPopupMenu(
             )
         ) {
             Box(Modifier.padding(20.dp)) {
+                val popupShape = RoundedCornerShape(24.dp)
                 Surface(
                     modifier = Modifier.width(width).heightIn(max = maxSurfaceHeight).dropShadow(
-                        shape = RoundedCornerShape(24.dp),
+                        shape = popupShape,
                         shadow = Shadow(
                             radius = 18.dp,
                             spread = 0.dp,
-                            color = Color.Black.copy(alpha = 0.18f),
+                            color = dshPalette().floatingShadow,
                             offset = DpOffset(x = 0.dp, y = 8.dp)
                         )
                     ),
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+                    shape = popupShape,
+                    color = dshPalette().surface,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp
                 ) {
@@ -2046,6 +2100,7 @@ private class ComposerPopupPositionProvider(
 
 @Composable
 private fun ContextUsageRing(stateHolder: AndroidSharedStateHolder) {
+    val palette = dshPalette()
     val snapshot = stateHolder.snapshot.contextSnapshot
     var expanded by remember(stateHolder.snapshot.selectedSessionId) { mutableStateOf(false) }
     val pressure = snapshot?.pressure
@@ -2067,8 +2122,8 @@ private fun ContextUsageRing(stateHolder: AndroidSharedStateHolder) {
             progress = { progress.coerceIn(0f, 1f) },
             modifier = Modifier.size(18.dp),
             strokeWidth = 3.dp,
-            color = DshColors.Ocean,
-            trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)
+            color = palette.primary,
+            trackColor = palette.surfaceMuted
         )
         ComposerPopupMenu(
             expanded = expanded,
@@ -2082,33 +2137,39 @@ private fun ContextUsageRing(stateHolder: AndroidSharedStateHolder) {
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("上下文已用", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
+                    Text("上下文已用", color = palette.textSecondary, fontSize = 14.sp)
                     Spacer(Modifier.width(8.dp))
                     Text(
                         if (contextWindow != null && contextWindow > 0 && pressure.pressureTokens != null)
                             "${kotlin.math.round(progress.coerceIn(0f, 1f) * 100).toInt()}%" else "—",
+                        color = palette.textPrimary,
                         fontWeight = FontWeight.SemiBold
                     )
                     Spacer(Modifier.weight(1f))
-                    Text("${contextTokenCount(pressure?.pressureTokens)} / ${contextTokenCount(contextWindow)}", fontSize = 12.sp)
+                    Text(
+                        "${contextTokenCount(pressure?.pressureTokens)} / ${contextTokenCount(contextWindow)}",
+                        color = palette.textTertiary,
+                        fontSize = 12.sp
+                    )
                 }
                 LinearProgressIndicator(
                     progress = { progress.coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth(),
-                    color = DshColors.Ocean
+                    color = palette.primary,
+                    trackColor = palette.surfaceMuted
                 )
                 val breakdown = snapshot?.breakdown
                 val usage = snapshot?.tokenUsage
                 if (breakdown != null) {
                     ContextUsageRow("系统提示词", breakdown.systemTokens, Color.Gray)
                     ContextUsageRow("工具", breakdown.toolsTokens, Color(0xFF8055CF))
-                    ContextUsageRow("对话消息", breakdown.messageTokens, DshColors.Ocean)
+                    ContextUsageRow("对话消息", breakdown.messageTokens, palette.primary)
                 } else if (usage != null) {
-                    ContextUsageRow("未缓存输入", usage.uncachedInputTokens, DshColors.Ocean)
+                    ContextUsageRow("未缓存输入", usage.uncachedInputTokens, palette.primary)
                     ContextUsageRow("缓存读取", usage.cacheReadTokens, Color(0xFF8055CF))
                     ContextUsageRow("模型输出", usage.outputTokens, Color(0xFFE18B38))
                 } else {
-                    Text("暂无上下文用量明细", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                    Text("暂无上下文用量明细", color = palette.textSecondary, fontSize = 13.sp)
                 }
             }
         }
@@ -2117,11 +2178,12 @@ private fun ContextUsageRing(stateHolder: AndroidSharedStateHolder) {
 
 @Composable
 private fun ContextUsageRow(title: String, tokens: Int?, color: Color) {
+    val palette = dshPalette()
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.size(11.dp).background(color, RoundedCornerShape(3.dp)))
-        Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
+        Text(title, color = palette.textSecondary, fontSize = 14.sp)
         Spacer(Modifier.weight(1f))
-        Text(contextTokenCount(tokens), fontSize = 14.sp)
+        Text(contextTokenCount(tokens), color = palette.textPrimary, fontSize = 14.sp)
     }
 }
 
@@ -2158,11 +2220,12 @@ private fun ConversationRow(
 @Composable
 private fun ConversationProcessRow(group: ConversationProcessGroup) {
     var expanded by remember(group.id) { mutableStateOf(false) }
+    val palette = dshPalette()
     val command = group.command
     val commandColor = if (command?.isError == true) {
         MaterialTheme.colorScheme.error
     } else {
-        MaterialTheme.colorScheme.onSurface
+        palette.textPrimary
     }
     Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
         Row(
@@ -2178,7 +2241,7 @@ private fun ConversationProcessRow(group: ConversationProcessGroup) {
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                     tint = if (command.isError) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
+                        else palette.textSecondary
                 )
             }
             if (command != null) {
@@ -2191,14 +2254,14 @@ private fun ConversationProcessRow(group: ConversationProcessGroup) {
                 )
                 Text(
                     "·",
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                    color = palette.textTertiary,
                     fontSize = 14.sp
                 )
                 Text(
                     command.text.singleLinePreview(),
                     modifier = Modifier.weight(1f),
                     color = if (command.isError) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                        else palette.textSecondary,
                     fontSize = 14.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -2207,7 +2270,7 @@ private fun ConversationProcessRow(group: ConversationProcessGroup) {
                 Text(
                     group.title,
                     modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                    color = palette.textSecondary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -2225,12 +2288,12 @@ private fun ConversationProcessRow(group: ConversationProcessGroup) {
                     Box(
                         Modifier.fillMaxWidth()
                             .background(
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                                palette.surfaceMuted,
                                 RoundedCornerShape(14.dp)
                             )
                             .border(
                                 1.dp,
-                                MaterialTheme.colorScheme.outline.copy(alpha = 0.16f),
+                                palette.cardBorder,
                                 RoundedCornerShape(14.dp)
                             )
                             .padding(horizontal = 14.dp, vertical = 12.dp)
@@ -2256,7 +2319,7 @@ private fun ConversationProcessRow(group: ConversationProcessGroup) {
         HorizontalDivider(
             modifier = Modifier.padding(top = 7.dp),
             thickness = 1.dp,
-            color = Color.Gray.copy(alpha = 0.16f)
+            color = palette.divider
         )
     }
 }
@@ -2334,7 +2397,7 @@ private fun ProcessToolDisclosure(tool: ConversationProcessTool) {
             tool.call?.text?.takeIf(String::isNotEmpty)?.let { arguments ->
                 Text(
                     "调用参数",
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                    color = dshPalette().textSecondary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -2347,7 +2410,7 @@ private fun ProcessToolDisclosure(tool: ConversationProcessTool) {
             tool.result?.text?.takeIf(String::isNotEmpty)?.let { result ->
                 Text(
                     if (failed) "错误" else "结果",
-                    color = if (failed) Color.Red else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                    color = if (failed) Color.Red else dshPalette().textSecondary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -2369,6 +2432,7 @@ private fun ProcessDisclosure(
     content: @Composable () -> Unit
 ) {
     var expanded by remember(id) { mutableStateOf(false) }
+    val palette = dshPalette()
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
@@ -2385,10 +2449,10 @@ private fun ProcessDisclosure(
             }
             if (stackedPreview) {
                 Column(Modifier.weight(1f).padding(vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(title, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                    Text(title, color = palette.textPrimary,
                         fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     if (preview.isNotEmpty()) Text(preview,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.52f),
+                        color = palette.textSecondary,
                         fontSize = 12.sp, fontFamily = FontFamily.Monospace,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
@@ -2402,11 +2466,11 @@ private fun ProcessDisclosure(
                     overflow = TextOverflow.Ellipsis
                 )
                 if (preview.isNotEmpty()) {
-                    Text("·", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f))
+                    Text("·", color = palette.textTertiary)
                     Text(
                         preview,
                         modifier = Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.52f),
+                        color = palette.textSecondary,
                         fontSize = 14.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -2431,7 +2495,7 @@ private fun ProcessChevron(expanded: Boolean) {
         painter = painterResource(R.drawable.ic_chevron_right),
         contentDescription = null,
         modifier = Modifier.size(15.dp).rotate(if (expanded) 90f else 0f),
-        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.30f)
+        tint = dshPalette().textTertiary
     )
 }
 
@@ -2465,9 +2529,10 @@ private fun UserMessage(
     onRetry: (String) -> Unit,
     onPreviewImages: (List<GatewayImageAttachment>, Int) -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
-    val bubbleFill = DshColors.Ocean.copy(alpha = if (isDark) 0.24f else 0.11f)
-    val bubbleEdge = DshColors.Ocean.copy(alpha = if (isDark) 0.34f else 0.08f)
+    val palette = dshPalette()
+    // 用户气泡在浅色体系里改用白色卡片 + 轻描边，靠右对齐与助手正文区分。
+    val bubbleFill = palette.surface
+    val bubbleEdge = if (palette.isDark) palette.primary.copy(alpha = 0.34f) else palette.cardBorder
     Column(
         Modifier.fillMaxWidth().padding(start = 34.dp, top = 12.dp, bottom = 12.dp),
         horizontalAlignment = Alignment.End,
@@ -2486,6 +2551,7 @@ private fun UserMessage(
                         .border(0.7.dp, bubbleEdge, RoundedCornerShape(15.dp))
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                         .testTag("user-text-bubble"),
+                    color = palette.textPrimary,
                     fontSize = 16.sp
                 )
                 CopyButton(item.text)
@@ -2602,9 +2668,9 @@ private fun UserAttachmentImage(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+            .background(dshPalette().surfaceMuted)
             .then(
-                if (borderWidth > 0.dp) Modifier.border(borderWidth, MaterialTheme.colorScheme.surface, shape)
+                if (borderWidth > 0.dp) Modifier.border(borderWidth, dshPalette().surface, shape)
                 else Modifier
             )
             .clickable {
@@ -2628,7 +2694,7 @@ private fun UserAttachmentImage(
                 },
                 modifier = Modifier.padding(10.dp),
                 fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                color = dshPalette().textTertiary
             )
         }
     }
@@ -2822,7 +2888,7 @@ private fun AssistantMessageHeaderContent(
         WhaleIcon(Modifier.width(26.dp).height(20.dp))
         Text(
             item.title,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+            color = dshPalette().textSecondary,
             fontSize = 14.sp,
             fontWeight = FontWeight.SemiBold
         )
@@ -2832,6 +2898,7 @@ private fun AssistantMessageHeaderContent(
 
 @Composable
 private fun StatusRow(item: ConversationItem) {
+    val palette = dshPalette()
     Row(
         Modifier.fillMaxWidth().padding(vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2842,25 +2909,26 @@ private fun StatusRow(item: ConversationItem) {
             contentDescription = null,
             modifier = Modifier.size(16.dp),
             tint = if (item.isError) MaterialTheme.colorScheme.error
-                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
+                else palette.textSecondary
         )
-        Text(item.title, fontSize = 14.sp, color = if (item.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
-        Text("·", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f))
-        Text(item.text, fontSize = 14.sp, color = if (item.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f))
+        Text(item.title, fontSize = 14.sp, color = if (item.isError) MaterialTheme.colorScheme.error else palette.textPrimary)
+        Text("·", fontSize = 14.sp, color = palette.textTertiary)
+        Text(item.text, fontSize = 14.sp, color = if (item.isError) MaterialTheme.colorScheme.error else palette.textSecondary)
     }
 }
 
 @Composable
 private fun SystemRow(item: ConversationItem) {
+    val palette = dshPalette()
     Row(
         Modifier.fillMaxWidth().padding(vertical = 6.dp)
-            .background((if (item.isError) Color.Red else DshColors.Ocean).copy(alpha = 0.06f), RoundedCornerShape(11.dp)).padding(10.dp)
+            .background((if (item.isError) Color.Red else palette.primary).copy(alpha = 0.06f), RoundedCornerShape(11.dp)).padding(10.dp)
     ) {
-        Text(if (item.isError) "!" else "⌁", color = if (item.isError) Color.Red else DshColors.Ocean)
+        Text(if (item.isError) "!" else "⌁", color = if (item.isError) Color.Red else palette.primary)
         Spacer(Modifier.width(9.dp))
         Column {
-            Text(item.title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            if (item.text.isNotEmpty()) Text(item.text, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            Text(item.title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = palette.textPrimary)
+            if (item.text.isNotEmpty()) Text(item.text, fontSize = 12.sp, color = palette.textSecondary)
         }
     }
 }
@@ -2873,6 +2941,7 @@ private fun AttachmentGrid(
     onRetry: (String) -> Unit
 ) {
     if (attachments.isEmpty()) return
+    val palette = dshPalette()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         attachments.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2880,7 +2949,7 @@ private fun AttachmentGrid(
                     val image = thumbnails[attachment.attachmentId]
                     Box(
                         Modifier.weight(1f).heightIn(min = 80.dp, max = 240.dp)
-                            .clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                            .clip(RoundedCornerShape(10.dp)).background(palette.surfaceMuted)
                             .clickable(enabled = states[attachment.attachmentId] in setOf(AttachmentLoadState.FAILED, AttachmentLoadState.DEFERRED)) {
                                 onRetry(attachment.attachmentId)
                             },
@@ -2896,7 +2965,7 @@ private fun AttachmentGrid(
                                     else -> "正在加载图片…"
                                 },
                                 fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                color = palette.textTertiary
                             )
                         }
                     }
@@ -2910,6 +2979,7 @@ private fun AttachmentGrid(
 @Composable
 private fun CopyButton(text: String) {
     if (text.isEmpty()) return
+    val palette = dshPalette()
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
     LaunchedEffect(copied) {
@@ -2930,7 +3000,7 @@ private fun CopyButton(text: String) {
             painter = painterResource(if (copied) R.drawable.ic_menu_check else R.drawable.ic_copy_message),
             contentDescription = null,
             modifier = Modifier.size(if (copied) 14.dp else 16.dp),
-            tint = if (copied) DshColors.Ocean else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+            tint = if (copied) palette.primary else palette.textSecondary
         )
     }
 }

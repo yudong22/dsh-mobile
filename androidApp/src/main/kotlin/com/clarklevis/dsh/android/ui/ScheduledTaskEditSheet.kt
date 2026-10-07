@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,6 +53,7 @@ internal fun ScheduledTaskEditSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val palette = dshPalette()
     val repeating = task.kind !in setOf("at", "after")
     val zone = remember(task.id) { TimeZone.getTimeZone(task.raw["timeZone"]?.stringValue ?: TimeZone.getDefault().id) }
     var title by remember(task.id) { mutableStateOf(task.title) }
@@ -81,7 +83,9 @@ internal fun ScheduledTaskEditSheet(
     ModalBottomSheet(
         onDismissRequest = { if (pendingRequestId == null) onDismiss() },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = MaterialTheme.colorScheme.surface
+        containerColor = palette.surface,
+        contentColor = palette.textPrimary,
+        scrimColor = Color.Black.copy(alpha = if (palette.isDark) 0.42f else 0.22f)
     ) {
         Column(
             Modifier.fillMaxWidth().navigationBarsPadding().verticalScroll(rememberScrollState())
@@ -93,7 +97,7 @@ internal fun ScheduledTaskEditSheet(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 TextButton(onClick = onDismiss, enabled = pendingRequestId == null) { Text("取消") }
-                Text("编辑定时任务", fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                Text("编辑定时任务", color = palette.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(top = 12.dp))
                 TextButton(
                     enabled = canSave,
@@ -115,7 +119,7 @@ internal fun ScheduledTaskEditSheet(
                 value = prompt, onValueChange = { prompt = it }, label = { Text("任务内容") },
                 minLines = 4, modifier = Modifier.fillMaxWidth()
             )
-            Text("执行时间", fontWeight = FontWeight.Medium)
+            Text("执行时间", color = palette.textPrimary, fontWeight = FontWeight.Medium)
             if (repeating) {
                 OutlinedButton(onClick = { useSpecificDate = !useSpecificDate }) {
                     Text(if (useSpecificDate) "保持原重复规则" else "改为指定日期执行一次")
@@ -131,7 +135,7 @@ internal fun ScheduledTaskEditSheet(
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("执行时刻  ${formatSelectedTime(selectedDate, TimeZone.getDefault())}") }
                 Text("按当前设备时区 ${TimeZone.getDefault().id} 选择，保存后按该时间执行一次。",
-                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    fontSize = 13.sp, color = palette.textSecondary)
                 if (timeChange != null && !selectedDate.after(Date())) {
                     Text("请选择未来的日期和时间。", fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
                 }
@@ -141,10 +145,10 @@ internal fun ScheduledTaskEditSheet(
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("执行时刻  ${formatSelectedTime(selectedTime, zone)}") }
                 Text("保留原有${if (task.kind == "daily") "每日" else "每周"}规则和时区 ${zone.id}。",
-                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    fontSize = 13.sp, color = palette.textSecondary)
             } else {
                 Text("当前规则：${scheduleRuleLabel(task)}。可选择指定日期和时间，明确改为单次执行。",
-                    fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    fontSize = 14.sp, color = palette.textSecondary)
             }
             (localError ?: if (pendingRequestId != null) stateHolder.scheduledTaskMutationError else null)?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp)

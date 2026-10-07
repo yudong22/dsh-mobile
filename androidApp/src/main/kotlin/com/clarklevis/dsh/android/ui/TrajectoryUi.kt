@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -251,11 +250,11 @@ private fun TrajectoryOverview(
     summary: TrajectoryOverviewSummary,
     onSelect: (TrajectoryNode) -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
+    val palette = dshPalette()
     val duration = String.format(Locale.US, "%.2f s", summary.durationSeconds)
     Box(
         modifier = Modifier.fillMaxWidth()
-            .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+            .background(palette.surfaceMuted)
             .testTag("trajectory-overview")
     ) {
         Column(
@@ -309,9 +308,7 @@ private fun TrajectoryOverview(
             }
         }
         Box(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(0.7.dp).background(
-                if (isDark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.10f)
-            )
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(0.7.dp).background(palette.divider)
         )
     }
 }
@@ -345,8 +342,8 @@ private fun TimelineOverviewCanvas(
     onSelect: (TrajectoryNode) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
-    val guideColor = if (isDark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.07f)
+    val palette = dshPalette()
+    val guideColor = palette.divider
     Canvas(
         modifier.pointerInput(entries) {
             detectTapGestures { position ->
@@ -374,7 +371,7 @@ private fun TimelineOverviewCanvas(
             val x = startX.coerceIn(0f, (size.width - width).coerceAtLeast(0f))
             val y = trajectoryLaneY(entry.node.kind).dp.toPx() - height / 2
             drawRoundRect(
-                color = trajectoryColor(entry.node.kind, isDark),
+                color = trajectoryColor(entry.node.kind, palette),
                 topLeft = Offset(x, y),
                 size = Size(width, height),
                 cornerRadius = CornerRadius(1.dp.toPx())
@@ -385,7 +382,6 @@ private fun TimelineOverviewCanvas(
 
 @Composable
 private fun TrajectoryTurnHeader(turn: Int) {
-    val isDark = isSystemInDarkTheme()
     Row(
         modifier = Modifier.fillMaxWidth().height(18.dp).padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -398,9 +394,7 @@ private fun TrajectoryTurnHeader(turn: Int) {
             fontFamily = FontFamily.Monospace
         )
         Box(
-            Modifier.weight(1f).height(1.dp).background(
-                if (isDark) Color.White.copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.10f)
-            )
+            Modifier.weight(1f).height(1.dp).background(MaterialTheme.colorScheme.outlineVariant)
         )
     }
 }
@@ -413,8 +407,9 @@ private fun TrajectoryRow(
     onRequest: (TrajectoryNode) -> Unit
 ) {
     val node = row.node
-    val isDark = isSystemInDarkTheme()
-    val color = trajectoryColor(node.kind, isDark)
+    val palette = dshPalette()
+    val isDark = palette.isDark
+    val color = trajectoryColor(node.kind, palette)
     Row(
         modifier = Modifier.fillMaxWidth().height(42.dp).clip(RoundedCornerShape(10.dp))
             .background(if (highlighted) DshColors.Ocean.copy(alpha = 0.12f) else Color.Transparent)
@@ -445,9 +440,7 @@ private fun TrajectoryRow(
             }
             Box(
                 Modifier.width(if (isDark) 1.5.dp else 1.dp).height(22.dp)
-                    .background(
-                        if (isDark) Color.White.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.14f)
-                    )
+                    .background(palette.divider)
             )
         }
         Row(
@@ -514,10 +507,10 @@ private fun TrajectoryRow(
     }
 }
 
-internal fun trajectoryColor(kind: TrajectoryNodeKind, isDark: Boolean): Color = when (kind) {
+internal fun trajectoryColor(kind: TrajectoryNodeKind, palette: DshPalette): Color = when (kind) {
     TrajectoryNodeKind.INPUT -> DshColors.Ocean
-    TrajectoryNodeKind.CONTEXT -> if (isDark) Color(0xFF30D158) else Color(0xFF34C759)
-    TrajectoryNodeKind.REQUEST -> Color(0xFF8E8E93)
+    TrajectoryNodeKind.CONTEXT -> if (palette.isDark) Color(0xFF30D158) else Color(0xFF34C759)
+    TrajectoryNodeKind.REQUEST -> palette.textTertiary
     TrajectoryNodeKind.ASSISTANT -> DshColors.Purple
     TrajectoryNodeKind.TOOL, TrajectoryNodeKind.SUBTOOL -> DshColors.Orange
 }

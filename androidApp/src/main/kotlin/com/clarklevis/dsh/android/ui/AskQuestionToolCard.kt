@@ -27,7 +27,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -74,16 +73,17 @@ internal fun AskQuestionToolCard(
     val selections = remember(rowKey) { mutableStateMapOf<String, Set<String>>() }
     val customAnswers = remember(rowKey) { mutableStateMapOf<String, String>() }
     var validationMessage by remember(rowKey) { mutableStateOf<String?>(null) }
+    val palette = dshPalette()
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.97f))
+            .background(palette.surface.copy(alpha = 0.97f))
             .border(
                 0.8.dp,
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                palette.cardBorder,
                 RoundedCornerShape(18.dp)
             )
             .padding(vertical = 13.dp)
@@ -95,7 +95,7 @@ internal fun AskQuestionToolCard(
             answered = answered,
             onCancel = onCancel
         )
-        HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f))
+        HorizontalDivider(color = palette.divider)
 
         if (questions.isEmpty()) {
             Text(
@@ -267,7 +267,12 @@ private fun QuestionCardFooter(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                label,
+                color = MaterialTheme.colorScheme.onPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }

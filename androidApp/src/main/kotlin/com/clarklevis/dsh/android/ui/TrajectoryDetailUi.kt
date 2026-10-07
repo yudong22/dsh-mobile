@@ -86,6 +86,7 @@ internal fun TrajectoryEventDetailSheet(
 
 @Composable
 private fun DetailSheetHeader(title: String, onDismiss: () -> Unit) {
+    val palette = dshPalette()
     val buttonShape = RoundedCornerShape(22.dp)
     Box(
         modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp),
@@ -110,8 +111,10 @@ private fun DetailSheetHeader(title: String, onDismiss: () -> Unit) {
             ),
             shape = buttonShape,
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color.White,
-                contentColor = Color(0xFF111318)
+                // 次级按钮底：浅色下是白 sheet 上的浅灰胶囊，深色下是深 sheet 上的高一档灰，
+                // 两种主题都与 sheet 底色区分得开。
+                containerColor = palette.surfaceMuted,
+                contentColor = palette.textPrimary
             ),
             elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
         ) {

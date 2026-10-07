@@ -60,7 +60,9 @@ internal fun ApprovalRequestCard(
 ) {
     var collapsed by remember(request.rpcId) { mutableStateOf(false) }
     var detailsExpanded by remember(request.rpcId) { mutableStateOf(false) }
-    val amber = Color(0xFFF59E0B)
+    val palette = dshPalette()
+    // 警示语义色：深色下用亮琥珀，浅色下换深琥珀，保证 14sp 标题在浅色卡片上的对比度。
+    val amber = if (palette.isDark) Color(0xFFF59E0B) else Color(0xFFB45309)
     val busy = status.kind == "submitting" || status.kind == "accepted"
     val shape = RoundedCornerShape(24.dp)
     val reason = request.localizedReason(Locale.getDefault().toLanguageTag())

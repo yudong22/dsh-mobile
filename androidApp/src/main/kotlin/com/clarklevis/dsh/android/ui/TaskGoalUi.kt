@@ -126,6 +126,7 @@ private fun TaskPanel(
     onExpandedChange: () -> Unit
 ) {
     val shape = RoundedCornerShape(20.dp)
+    val palette = dshPalette()
     val arrowRotation by animateFloatAsState(
         targetValue = if (expanded) 0f else 180f,
         animationSpec = tween(220),
@@ -140,10 +141,7 @@ private fun TaskPanel(
         modifier = Modifier.fillMaxWidth(),
         shape = shape,
         color = panelSurface,
-        border = androidx.compose.foundation.BorderStroke(
-            0.8.dp,
-            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f)
-        )
+        border = androidx.compose.foundation.BorderStroke(0.8.dp, palette.cardBorder)
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Row(
@@ -249,6 +247,7 @@ private fun GoalPanel(
     val shape = RoundedCornerShape(20.dp)
     // 与 Composer 使用相同的底色透明度，保证任务与目标区块不会透出聊天内容。
     val panelSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
+    val palette = dshPalette()
     val isActive = phase == "active"
     val phaseLabel = when (phase) {
         "active" -> "进行中的目标"
@@ -260,10 +259,7 @@ private fun GoalPanel(
         modifier = Modifier.fillMaxWidth(),
         shape = shape,
         color = panelSurface,
-        border = androidx.compose.foundation.BorderStroke(
-            0.8.dp,
-            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f)
-        )
+        border = androidx.compose.foundation.BorderStroke(0.8.dp, palette.cardBorder)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),

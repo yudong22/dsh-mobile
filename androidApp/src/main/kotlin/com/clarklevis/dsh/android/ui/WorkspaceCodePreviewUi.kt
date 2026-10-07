@@ -2,7 +2,6 @@ package com.clarklevis.dsh.android.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -179,16 +178,17 @@ private fun CodePreviewToolbar(
 
 @Composable
 private fun CodePreviewDocument(document: WorkspaceCodeDocument) {
-    val dark = isSystemInDarkTheme()
+    val palette = dshPalette()
+    val dark = palette.isDark
     val verticalScroll = rememberScrollState()
     val horizontalScroll = rememberScrollState()
     val highlighted = remember(document, dark) { highlightedCode(document, dark) }
     val lineNumbers = remember(document.lineCount) {
         (1..document.lineCount).joinToString("\n")
     }
-    val codeBackground = if (dark) Color(0xFF0D1117) else Color(0xFFFAFBFC)
-    val gutterBackground = if (dark) Color(0xFF161B22) else Color(0xFFF0F2F5)
-    val secondary = if (dark) Color(0xFF7D8590) else Color(0xFF8C959F)
+    val codeBackground = palette.canvas
+    val gutterBackground = palette.surfaceMuted
+    val secondary = palette.textSecondary
 
     Column(Modifier.fillMaxSize().background(codeBackground)) {
         Row(
@@ -201,7 +201,7 @@ private fun CodePreviewDocument(document: WorkspaceCodeDocument) {
         ) {
             Text(
                 document.languageDisplayName,
-                color = MaterialTheme.colorScheme.primary,
+                color = palette.primary,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold
             )

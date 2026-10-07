@@ -3,6 +3,7 @@ package com.clarklevis.dsh.android
 import android.net.Uri
 import android.util.Base64
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -14,6 +15,7 @@ import com.clarklevis.dsh.android.platform.GatewayDiagnosticAction
 import com.clarklevis.dsh.android.platform.AndroidImagePreprocessor
 import com.clarklevis.dsh.android.platform.AndroidPreparedImage
 import com.clarklevis.dsh.android.platform.BoundedLruCache
+import com.clarklevis.dsh.shared.domain.SessionSummary
 import com.clarklevis.dsh.shared.facade.SharedSessionAgentPresetStore
 import com.clarklevis.dsh.shared.facade.SharedSessionAgentPresetTransition
 import com.clarklevis.dsh.shared.facade.SharedMobileSnapshot
@@ -283,7 +285,9 @@ class AndroidSharedStateHolder(
                             workspacePreferenceLoaded = true
                             // 冷启动首次读到偏好时，用本地缓存播种会话列表，
                             // 使连接建立前就能看到上次的会话；连接后由宿主 sessions 帧覆盖。
-                            if (!sessionCacheRestored) {
+                            // 只在真正拿到非空缓存时消费这次机会：首次 emit 可能还没有
+                            // sessionsJson（新主机、迁移中），提前置位会让播种永久失效。
+                            if (!sessionCacheRestored && !value.sessionsJson.isNullOrBlank()) {
                                 sessionCacheRestored = true
                                 if (snapshot.sessions.isEmpty()) {
                                     applyRestoredSessionCache(value.sessionsJson)
@@ -785,12 +789,15 @@ class AndroidSharedStateHolder(
     }
 
     /**
-     * 用缓存播种该会话的对话内容。只在内存里还没有该会话事件时执行，避免覆盖
-     * 本次进程已收到的更新内容。
+     * 用缓存播种该会话的对话内容。
+     *
+     * 判据必须是「该会话本进程是否已有实时内容」，而不是「当前选中的会话是否有内容」——
+     * 调用点上 `snapshot.selectedSessionId` 仍是**上一个**会话（投影的 selectSession 尚未
+     * 执行），拿它比较会退化成「上一个会话有内容就跳过恢复」，语义完全错位。
      */
     private suspend fun restoreConversationFromCacheIfAvailable(sessionId: String) {
         val appGraph = graph ?: return
-        if (snapshot.selectedSessionId == sessionId && snapshot.conversation.isNotEmpty()) return
+        if (projectionActor.hasLiveContent(sessionId)) return
         val payload = runCatching { appGraph.conversationCache.read(sessionId) }.getOrNull() ?: return
         // actor 内部经 uiDispatcher 发布 snapshot，这里不再重复写 Compose state。
         runCatching { projectionActor.restoreConversationCache(sessionId, payload) }
@@ -969,21 +976,49 @@ class AndroidSharedStateHolder(
         }
     }
 
+    /**
+     * 首页专用的派生视图。
+     *
+     * `snapshot` 是单个 `mutableStateOf<SharedMobileSnapshot>`，失效粒度是**整个对象**：
+     * 流式回复只改 `conversation`，也会让所有读过 `snapshot` 的作用域（含整个首页）失效重组。
+     * `derivedStateOf` 会在上游变化后重算自身，若结果与上次相等则**不向下传播**失效——
+     * 首页因此只在这三个字段真正变化时才重组。
+     *
+     * 只在 Main 上读（这些 getter 都被 Composable 调用），依赖读取处于正确的快照上下文。
+     */
+    val homeSessions: List<SessionSummary> by derivedStateOf { snapshot.sessions }
+
+    val homeSearchResultSessionIds: List<String> by derivedStateOf { snapshot.searchResultSessionIds }
+
+    private val rawWorkspaces: List<GatewayWorkspace> by derivedStateOf { snapshot.workspaces }
+
+    /**
+     * 工作区列表。`recentlyCreatedWorkspace` 存在时才需要拼接，此时结果也必须**缓存**：
+     * 直接返回新 list 会让引用相等失效，使 Compose 里以它为 key 的 `remember`
+     * 每次重组都重算（首页会话过滤因此反复跑）。
+     */
     val availableWorkspaces: List<GatewayWorkspace>
         get() {
-            val created = recentlyCreatedWorkspace ?: return snapshot.workspaces
-            return if (snapshot.workspaces.any { it.workspaceId == created.workspaceId }) {
-                snapshot.workspaces
-            } else {
-                snapshot.workspaces + created
+            val created = recentlyCreatedWorkspace ?: return rawWorkspaces
+            if (rawWorkspaces.any { it.workspaceId == created.workspaceId }) return rawWorkspaces
+            return appendedWorkspacesCache.getOrPut(created.workspaceId to rawWorkspaces) {
+                rawWorkspaces + created
             }
+        }
+
+    private val appendedWorkspacesCache =
+        object : LinkedHashMap<Pair<String, List<GatewayWorkspace>>, List<GatewayWorkspace>>(2, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<Pair<String, List<GatewayWorkspace>>, List<GatewayWorkspace>>
+            ): Boolean = size > 4
         }
 
     val activeWorkspace: GatewayWorkspace?
         get() {
             if (selectedWorkspaceId == UNGROUPED_WORKSPACE_ID) return null
-            return availableWorkspaces.firstOrNull { it.workspaceId == selectedWorkspaceId }
-                ?: availableWorkspaces.firstOrNull()
+            val available = availableWorkspaces
+            return available.firstOrNull { it.workspaceId == selectedWorkspaceId }
+                ?: available.firstOrNull()
         }
 
     val isUngroupedWorkspaceSelected: Boolean

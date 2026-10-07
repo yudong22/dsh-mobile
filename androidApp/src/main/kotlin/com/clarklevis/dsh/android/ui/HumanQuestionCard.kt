@@ -22,7 +22,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -68,7 +67,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.shadow.Shadow
@@ -178,7 +176,7 @@ internal fun HumanQuestionCard(
             .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
         val cardMaxHeight = minOf(maxHeight, 500.dp)
-        val isDark = isSystemInDarkTheme()
+        val palette = dshPalette()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -191,15 +189,15 @@ internal fun HumanQuestionCard(
                     shape = QuestionCardShape,
                     shadow = Shadow(
                         radius = 20.dp,
-                        color = Color.Black.copy(alpha = if (isDark) 0.30f else 0.12f),
+                        color = palette.floatingShadow,
                         offset = DpOffset(0.dp, 9.dp)
                     )
                 )
                 .clip(QuestionCardShape)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.98f))
+                .background(palette.surface.copy(alpha = 0.98f))
                 .border(
                     0.8.dp,
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                    palette.cardBorder,
                     QuestionCardShape
                 )
         ) {
@@ -225,7 +223,7 @@ internal fun HumanQuestionCard(
                 ) + fadeOut(tween(120))
             ) {
                 Column {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     val scrollState = rememberScrollState()
                     LaunchedEffect(currentIndex) { scrollState.scrollTo(0) }
                     Column(
@@ -264,7 +262,7 @@ internal fun HumanQuestionCard(
                             )
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     QuestionFooter(
                         currentIndex = currentIndex,
                         questionCount = request.questions.size,
@@ -340,6 +338,7 @@ private fun QuestionCancelConfirmation(
                 )
         ) {
             val density = LocalDensity.current
+            val palette = dshPalette()
             var popoverHeightPx by remember { mutableIntStateOf(0) }
             val verticalGapPx = with(density) { 2.dp.roundToPx() }
             val minimumTopPx = with(density) { 48.dp.roundToPx() }
@@ -415,7 +414,7 @@ private fun QuestionCancelConfirmation(
                             ) {
                                 Text(
                                     "跳过并让 Agent 继续",
-                                    color = Color(0xFFFF3B30),
+                                    color = DshColors.Danger,
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -434,7 +433,7 @@ private fun QuestionCancelConfirmation(
                                     shape = QuestionConfirmationArrowShape,
                                     shadow = Shadow(
                                         radius = 4.dp,
-                                        color = Color.Black.copy(alpha = 0.10f),
+                                        color = palette.floatingShadow,
                                         offset = DpOffset(0.dp, 2.dp)
                                     )
                                 )
@@ -802,7 +801,7 @@ private fun QuestionFooter(
                 shape = RoundedCornerShape(21.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = DshColors.Ocean,
-                    contentColor = Color.White
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 contentPadding = ButtonDefaults.ContentPadding
             ) {

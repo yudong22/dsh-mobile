@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -30,7 +31,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -46,7 +46,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
@@ -75,6 +74,7 @@ internal fun WorkspaceFilesBottomSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val palette = dshPalette()
     // 使用稳定的窗口高度，避免面板 offset 改变 Insets 后反复重算展开锚点。
     val sheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.88f
     val context = LocalContext.current
@@ -200,14 +200,14 @@ internal fun WorkspaceFilesBottomSheet(
         // 文件列表独占滚动/惯性手势；面板通过完成、返回或点击遮罩关闭。
         sheetGesturesEnabled = false,
         dragHandle = null,
-        containerColor = Color(0xFFF5F5F5),
-        contentColor = MaterialTheme.colorScheme.onSurface
+        containerColor = palette.surface,
+        contentColor = palette.textPrimary
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .height(sheetHeight)
-                .background(MaterialTheme.colorScheme.surface)
+                .background(palette.surface)
                 .padding(bottom = 12.dp)
         ) {
             WorkspaceFileSheetHeader(stateHolder, onDismiss)
@@ -215,12 +215,12 @@ internal fun WorkspaceFilesBottomSheet(
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         CircularProgressIndicator()
-                        Text("正在读取工作区文件…", color = secondaryContentColor())
+                        Text("正在读取工作区文件…", color = palette.textSecondary)
                     }
                 }
             } else if (stateHolder.workspaceFileEntries.isEmpty()) {
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    Text("此目录为空", color = secondaryContentColor())
+                    Text("此目录为空", color = palette.textSecondary)
                 }
             } else {
                 LazyColumn(
@@ -238,7 +238,7 @@ internal fun WorkspaceFilesBottomSheet(
                         )
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 72.dp),
-                            color = separatorColor()
+                            color = palette.divider
                         )
                     }
                 }
@@ -249,7 +249,7 @@ internal fun WorkspaceFilesBottomSheet(
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             "正在下载 · ${(progress * 100).toInt()}%",
-                            color = secondaryContentColor(),
+                            color = palette.textSecondary,
                             fontSize = 12.sp
                         )
                         Spacer(Modifier.weight(1f))
@@ -301,10 +301,11 @@ private fun WorkspaceFileSheetHeader(
     stateHolder: AndroidSharedStateHolder,
     onDismiss: () -> Unit
 ) {
+    val palette = dshPalette()
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Color(0xFFF5F5F5))
+            .background(palette.surfaceMuted)
             .padding(top = 16.dp)
     ) {
         Box(
@@ -325,15 +326,17 @@ private fun WorkspaceFileSheetHeader(
                 "工作区文件",
                 modifier = Modifier.align(Alignment.Center),
                 fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = palette.textPrimary
             )
             Surface(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .height(48.dp),
                 shape = RoundedCornerShape(24.dp),
-                color = Color.White,
-                shadowElevation = 8.dp
+                color = palette.surface,
+                border = BorderStroke(1.dp, palette.cardBorder),
+                shadowElevation = 0.dp
             ) {
                 TextButton(
                     onClick = onDismiss,
@@ -341,7 +344,7 @@ private fun WorkspaceFileSheetHeader(
                 ) {
                     Text(
                         "完成",
-                        color = Color.Black,
+                        color = palette.textPrimary,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -359,21 +362,21 @@ private fun WorkspaceFileSheetHeader(
                 painter = painterResource(R.drawable.ic_folder_outline),
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
-                tint = secondaryContentColor()
+                tint = palette.textSecondary
             )
             Text(
                 if (stateHolder.workspaceFilePath == ".") "工作区根目录" else stateHolder.workspaceFilePath,
                 modifier = Modifier.padding(start = 8.dp).weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.MiddleEllipsis,
-                color = secondaryContentColor(),
+                color = palette.textSecondary,
                 fontSize = 15.sp
             )
             if (stateHolder.workspaceFilesAreLoading) {
                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
             }
         }
-        HorizontalDivider(color = separatorColor())
+        HorizontalDivider(color = palette.divider)
     }
 }
 
@@ -383,6 +386,7 @@ private fun WorkspaceFileItemRow(
     item: GatewayDirectoryItem,
     isDownloaded: Boolean
 ) {
+    val palette = dshPalette()
     val isDownloading = item.kind == "file" &&
         stateHolder.workspaceFileDownloadPurpose == "download" &&
         stateHolder.workspaceFileDownloadPath == item.path
@@ -402,7 +406,7 @@ private fun WorkspaceFileItemRow(
             ),
             contentDescription = null,
             modifier = Modifier.size(25.dp),
-            tint = MaterialTheme.colorScheme.primary
+            tint = palette.textPrimary
         )
         Column(Modifier.padding(start = 12.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
@@ -410,12 +414,13 @@ private fun WorkspaceFileItemRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                color = palette.textPrimary
             )
             if (item.kind == "file") {
                 Text(
                     workspaceFileDetail(item),
-                    color = secondaryContentColor(),
+                    color = palette.textSecondary,
                     fontSize = 13.sp,
                     maxLines = 1
                 )
@@ -442,20 +447,21 @@ private fun WorkspaceDownloadIcon(
     isDownloaded: Boolean,
     fileName: String
 ) {
+    val palette = dshPalette()
     when {
         progress != null -> Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(
                 progress = { progress },
                 modifier = Modifier.size(24.dp),
                 strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                color = DshColors.Ocean,
+                trackColor = palette.textTertiary.copy(alpha = 0.30f)
             )
             Icon(
                 painter = painterResource(R.drawable.ic_download_arrow),
                 contentDescription = "正在下载 $fileName",
                 modifier = Modifier.size(13.dp),
-                tint = MaterialTheme.colorScheme.primary
+                tint = DshColors.Ocean
             )
         }
         isDownloaded -> Icon(
@@ -468,7 +474,7 @@ private fun WorkspaceDownloadIcon(
             painter = painterResource(R.drawable.ic_download_circle),
             contentDescription = "下载 $fileName",
             modifier = Modifier.size(22.dp),
-            tint = MaterialTheme.colorScheme.onSurface
+            tint = palette.textPrimary
         )
     }
 }
@@ -495,9 +501,3 @@ private fun Double.roundedDisplay(): String =
     if (this < 10) "%.1f".format(Locale.CHINA, this) else "%.0f".format(Locale.CHINA, this)
 
 private val WORKSPACE_DATE_FORMAT = SimpleDateFormat("yyyy年M月d日 HH:mm", Locale.CHINA)
-
-@Composable
-private fun secondaryContentColor(): Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
-
-@Composable
-private fun separatorColor(): Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.09f)

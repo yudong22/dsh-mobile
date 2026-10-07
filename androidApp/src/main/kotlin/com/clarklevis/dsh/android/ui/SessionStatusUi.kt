@@ -3,7 +3,6 @@ package com.clarklevis.dsh.android.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -132,9 +131,9 @@ internal fun SessionStatsBanner(
     onViewFullStats: () -> Unit
 ) {
     var expanded by remember(sessionId) { mutableStateOf(false) }
-    val isDark = isSystemInDarkTheme()
-    val glassEdge = dshGlassEdge(isDark)
-    val shadowColor = dshFloatingSurfaceShadow(isDark)
+    val palette = dshPalette()
+    val glassEdge = palette.cardBorder
+    val shadowColor = palette.floatingShadow
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.End
@@ -207,9 +206,9 @@ private fun SessionStatsPopover(
 ) {
     if (!expanded) return
     val density = LocalDensity.current
-    val isDark = isSystemInDarkTheme()
-    val glassEdge = dshGlassEdge(isDark)
-    val shadowColor = dshFloatingSurfaceShadow(isDark)
+    val palette = dshPalette()
+    val glassEdge = palette.cardBorder
+    val shadowColor = palette.floatingShadow
     Popup(
         alignment = Alignment.BottomEnd,
         offset = with(density) { IntOffset(0, (-20).dp.roundToPx()) },
@@ -253,7 +252,7 @@ private fun SessionStatsPopover(
                     snapshot.tokenUsage?.totals?.inputTokens?.let {
                         AgentStatusRow("输入", "${SessionStatsFormatter.compact(it)} tok")
                     }
-                    HorizontalDivider(color = Color.Black.copy(alpha = 0.08f))
+                    HorizontalDivider(color = palette.divider)
                     Text(
                         "查看完整统计",
                         modifier = Modifier.fillMaxWidth().clickable(onClick = onViewFullStats)
@@ -269,8 +268,9 @@ private fun SessionStatsPopover(
 
 @Composable
 private fun AgentStatusRow(title: String, value: String) {
+    val palette = dshPalette()
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = Color(0xFF7A7A80), fontSize = 14.sp)
+        Text(title, color = palette.textSecondary, fontSize = 14.sp)
         Spacer(Modifier.weight(1f))
         Text(
             value,
@@ -289,6 +289,7 @@ internal fun SessionStatsSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val coroutineScope = rememberCoroutineScope()
+    val palette = dshPalette()
     val windowHeight = LocalWindowInfo.current.containerSize.height
     val expandedTopInset = with(LocalDensity.current) { windowHeight.toDp() * 0.12f }
     val dismissWithAnimation = {
@@ -306,8 +307,8 @@ internal fun SessionStatsSheet(
         modifier = Modifier.fillMaxHeight().padding(top = expandedTopInset),
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
-        containerColor = Color(0xFFF2F2F7),
-        contentColor = Color(0xFF111217),
+        containerColor = palette.surface,
+        contentColor = palette.textPrimary,
         scrimColor = Color.Black.copy(alpha = 0.28f),
         dragHandle = {
             Box(
@@ -316,7 +317,7 @@ internal fun SessionStatsSheet(
             ) {
                 Box(
                     Modifier.width(36.dp).height(5.dp)
-                        .background(Color(0xFF8E8E93), CircleShape)
+                        .background(palette.textTertiary, CircleShape)
                 )
             }
         }
@@ -334,8 +335,8 @@ internal fun SessionStatsSheet(
                     modifier = Modifier.align(Alignment.CenterEnd).height(44.dp)
                         .clickable(role = Role.Button, onClick = dismissWithAnimation),
                     shape = CircleShape,
-                    color = Color.White.copy(alpha = 0.72f),
-                    border = BorderStroke(0.7.dp, Color.Black.copy(alpha = 0.06f))
+                    color = palette.surfaceMuted,
+                    border = BorderStroke(0.7.dp, palette.cardBorder)
                 ) {
                     Box(Modifier.padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
                         Text("完成", fontSize = 16.sp, fontWeight = FontWeight.Medium)
@@ -353,7 +354,7 @@ internal fun SessionStatsSheet(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("正在读取会话统计", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                             Spacer(Modifier.height(8.dp))
-                            Text("统计会在本轮结束后自动更新。", color = Color(0xFF8E8E93), fontSize = 14.sp)
+                            Text("统计会在本轮结束后自动更新。", color = palette.textSecondary, fontSize = 14.sp)
                         }
                     }
                 } else {
@@ -394,7 +395,7 @@ internal fun SessionStatsSheet(
                     snapshot.asOfSeq?.let {
                         Text(
                             "数据截至事件 #$it",
-                            color = Color(0xFFAEAEB2),
+                            color = palette.textTertiary,
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace
                         )
@@ -408,11 +409,12 @@ internal fun SessionStatsSheet(
 
 @Composable
 private fun StatsMetricsSection(title: String, metrics: List<Pair<String, String>>) {
+    val palette = dshPalette()
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         Column(
             modifier = Modifier.fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.025f), RoundedCornerShape(16.dp))
+                .background(palette.surfaceMuted, RoundedCornerShape(16.dp))
                 .padding(horizontal = 14.dp)
         ) {
             metrics.forEach { (label, value) ->
@@ -420,7 +422,7 @@ private fun StatsMetricsSection(title: String, metrics: List<Pair<String, String
                     modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(label, color = Color(0xFF8E8E93), fontSize = 16.sp)
+                    Text(label, color = palette.textSecondary, fontSize = 16.sp)
                     Spacer(Modifier.weight(1f))
                     Text(
                         value,

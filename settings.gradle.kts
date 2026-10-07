@@ -1,5 +1,8 @@
 pluginManagement {
     repositories {
+        maven("https://maven.aliyun.com/repository/public/")
+        maven("https://maven.aliyun.com/repository/google/")
+        maven("https://maven.aliyun.com/repository/gradle-plugin/")
         google {
             content {
                 includeGroupByRegex("androidx.*")
@@ -15,6 +18,8 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        maven("https://maven.aliyun.com/repository/public/")
+        maven("https://maven.aliyun.com/repository/google/")
         google {
             content {
                 includeGroupByRegex("androidx.*")
@@ -26,9 +31,9 @@ dependencyResolutionManagement {
     }
 }
 
-plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
-}
+// plugins {
+//     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+// }
 
 rootProject.name = "dsh-mobile-kmm"
 

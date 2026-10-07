@@ -16,7 +16,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -105,33 +104,58 @@ internal fun GatewayAuthenticationMenu(
             description = "设备认证，${gatewayConnectionTitle(state.connection)}",
             onClick = { expanded = true }
         )
-        DropdownMenu(
+        GatewayAuthenticationMenuContent(
+            state = state,
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            modifier = Modifier.width(248.dp).testTag("gateway-auth-menu"),
-            offset = DpOffset(x = (-244).dp, y = 8.dp),
-            shape = RoundedCornerShape(28.dp),
-            containerColor = Color(0xFFE2EEFF).copy(alpha = 0.96f),
-            tonalElevation = 0.dp,
-            shadowElevation = 12.dp,
-            border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.62f))
+            onScan = onScan,
+            onManualEntry = onManualEntry
+        )
+    }
+}
+
+/**
+ * 认证菜单的内容部分，与触发按钮解耦。
+ *
+ * 底栏「扫码」是一个 Tab 而非此处的圆形按钮，需要由外部状态驱动展开，
+ * 因此菜单内容单独暴露；锚点由调用方决定。
+ */
+@Composable
+internal fun GatewayAuthenticationMenuContent(
+    state: GatewayRuntimeState,
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    onScan: () -> Unit,
+    onManualEntry: () -> Unit,
+    offset: DpOffset = DpOffset(x = (-244).dp, y = 8.dp)
+) {
+    val palette = dshPalette()
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        modifier = Modifier.width(248.dp).testTag("gateway-auth-menu"),
+        offset = offset,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = palette.surface,
+        tonalElevation = 0.dp,
+        shadowElevation = 12.dp,
+        border = BorderStroke(1.dp, palette.cardBorder)
+    ) {
+        AuthenticationMenuItem(
+            title = "扫描二维码",
+            iconRes = R.drawable.ic_qr_viewfinder,
+            testTag = "gateway-auth-scan"
         ) {
-            AuthenticationMenuItem(
-                title = "扫描二维码",
-                iconRes = R.drawable.ic_qr_viewfinder,
-                testTag = "gateway-auth-scan"
-            ) {
-                expanded = false
-                onScan()
-            }
-            AuthenticationMenuItem(
-                title = "手动输入配对信息",
-                iconRes = R.drawable.ic_keyboard_outline,
-                testTag = "gateway-auth-manual"
-            ) {
-                expanded = false
-                onManualEntry()
-            }
+            onDismissRequest()
+            onScan()
+        }
+        AuthenticationMenuItem(
+            title = "手动输入配对信息",
+            iconRes = R.drawable.ic_keyboard_outline,
+            testTag = "gateway-auth-manual"
+        ) {
+            onDismissRequest()
+            onManualEntry()
         }
     }
 }
@@ -143,11 +167,12 @@ private fun AuthenticationMenuItem(
     testTag: String,
     onClick: () -> Unit
 ) {
+    val palette = dshPalette()
     DropdownMenuItem(
         text = {
             Text(
                 text = title,
-                color = DshColors.Ink,
+                color = palette.textPrimary,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -157,7 +182,7 @@ private fun AuthenticationMenuItem(
                 painter = painterResource(iconRes),
                 contentDescription = null,
                 modifier = Modifier.size(22.dp),
-                colorFilter = ColorFilter.tint(DshColors.Ink)
+                colorFilter = ColorFilter.tint(palette.textPrimary)
             )
         },
         modifier = Modifier.height(58.dp).testTag(testTag),
@@ -174,8 +199,8 @@ internal fun ManualGatewayPairingSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
-    val isDark = isSystemInDarkTheme()
-    val background = if (isDark) MaterialTheme.colorScheme.background else Color(0xFFF2F2F7)
+    val palette = dshPalette()
+    val background = palette.canvas
     var pairingText by rememberSaveable { mutableStateOf("") }
     var validationError by rememberSaveable { mutableStateOf<String?>(null) }
     var didAttemptConnection by rememberSaveable { mutableStateOf(false) }
@@ -205,8 +230,8 @@ internal fun ManualGatewayPairingSheet(
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 38.dp, topEnd = 38.dp),
         containerColor = background,
-        contentColor = MaterialTheme.colorScheme.onBackground,
-        scrimColor = Color.Black.copy(alpha = 0.22f),
+        contentColor = palette.textPrimary,
+        scrimColor = Color.Black.copy(alpha = if (palette.isDark) 0.42f else 0.22f),
         dragHandle = null
     ) {
         Column(
@@ -223,11 +248,12 @@ internal fun ManualGatewayPairingSheet(
                     modifier = Modifier.align(Alignment.CenterEnd).height(48.dp)
                         .clickable(role = Role.Button, onClick = dismissWithAnimation),
                     shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                    color = palette.surface,
+                    border = BorderStroke(1.dp, palette.cardBorder),
                     shadowElevation = 0.dp
                 ) {
                     Box(Modifier.padding(horizontal = 19.dp), contentAlignment = Alignment.Center) {
-                        Text("完成", fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        Text("完成", color = palette.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -241,7 +267,7 @@ internal fun ManualGatewayPairingSheet(
                     Text("手动输入配对信息", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                     Text(
                         "粘贴 Harness WebUI 提供的 Base64URL 配对字符串。长期设备 token 仍只会安全保存到 Android Keystore。",
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.52f),
+                        color = palette.textSecondary,
                         fontSize = 15.sp,
                         lineHeight = 21.sp
                     )
@@ -336,32 +362,29 @@ internal fun ManualGatewayPairingSheet(
 
 @Composable
 private fun PairingTextEditor(value: String, onValueChange: (String) -> Unit) {
+    val palette = dshPalette()
     val shape = RoundedCornerShape(20.dp)
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = Modifier.fillMaxWidth().heightIn(min = 210.dp).clip(shape)
-            .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.025f), shape)
-            .border(
-                0.8.dp,
-                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.10f),
-                shape
-            )
+            .background(palette.surface, shape)
+            .border(1.dp, palette.cardBorder, shape)
             .padding(16.dp)
             .testTag("gateway-pairing-input"),
         textStyle = TextStyle(
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.88f),
+            color = palette.textPrimary,
             fontSize = 13.sp,
             lineHeight = 18.sp,
             fontFamily = FontFamily.Monospace
         ),
-        cursorBrush = SolidColor(DshColors.Ocean),
+        cursorBrush = SolidColor(palette.primary),
         decorationBox = { input ->
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
                 if (value.isEmpty()) {
                     Text(
                         MANUAL_PAIRING_PLACEHOLDER,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.25f),
+                        color = palette.textTertiary,
                         fontSize = 13.sp,
                         lineHeight = 18.sp,
                         fontFamily = FontFamily.Monospace
@@ -386,6 +409,7 @@ private fun pairingResultPresentation(
     didAttemptConnection: Boolean,
     validationError: String?
 ): PairingResultPresentation {
+    val palette = dshPalette()
     if (validationError != null) {
         return PairingResultPresentation(
             "配对信息无效",
@@ -398,7 +422,7 @@ private fun pairingResultPresentation(
         return PairingResultPresentation(
             gatewayConnectionTitle(state.connection),
             "输入 Base64URL 配对字符串后点击连接，结果会显示在这里。",
-            MaterialTheme.colorScheme.onBackground.copy(alpha = 0.50f),
+            palette.textSecondary,
             R.drawable.ic_gateway_auth
         )
     }
@@ -427,7 +451,7 @@ private fun pairingResultPresentation(
         GatewayConnectionState.SUSPENDED -> PairingResultPresentation(
             "未连接",
             "请检查配对信息后重新连接。",
-            MaterialTheme.colorScheme.onBackground.copy(alpha = 0.50f),
+            palette.textSecondary,
             R.drawable.ic_gateway_auth
         )
     }
@@ -441,6 +465,7 @@ private fun pairingFailureDetail(error: String?): String = when (error) {
 
 @Composable
 private fun PairingResultCard(presentation: PairingResultPresentation) {
+    val palette = dshPalette()
     Row(
         modifier = Modifier.fillMaxWidth()
             .background(presentation.color.copy(alpha = 0.08f), RoundedCornerShape(18.dp))
@@ -456,10 +481,10 @@ private fun PairingResultCard(presentation: PairingResultPresentation) {
             colorFilter = ColorFilter.tint(presentation.color)
         )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(presentation.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text(presentation.title, color = palette.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 presentation.detail,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.52f),
+                color = palette.textSecondary,
                 fontSize = 15.sp,
                 lineHeight = 20.sp
             )

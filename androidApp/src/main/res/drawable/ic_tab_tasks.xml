@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 底部导航「任务」：对话气泡 + 播放标记。
+     单色描边实现，保证被 ColorFilter.tint 着色时不会丢失内部形状（选中/未选中只变颜色）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M12,3.6A8.4,8.4 0,0 0,5.4 17.75L4.3,20.5A0.6,0.6 0,0 0,5.05 21.25L7.85,20.15A8.4,8.4 0,1 0,12 3.6Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.9" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M10.4,9.15A0.75,0.75 0,0 0,9.3 9.8L9.3,14.2A0.75,0.75 0,0 0,10.4 14.85L14.0,12.65A0.75,0.75 0,0 0,14.0 11.35Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.7" />
+</vector>

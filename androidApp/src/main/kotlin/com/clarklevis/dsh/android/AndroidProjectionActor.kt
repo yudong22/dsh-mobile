@@ -243,6 +243,14 @@ internal class AndroidProjectionActor(
         }
 
     /**
+     * 该会话本进程是否已有实时内容。必须在 `mutationLock` 内读取：`liveSessionIds`
+     * 由后台 gateway dispatcher 写入，绕过锁会读到撕裂状态。
+     */
+    suspend fun hasLiveContent(sessionId: String): Boolean = mutationLock.withLock {
+        projection.hasLiveContent(sessionId)
+    }
+
+    /**
      * 会话正文缓存的导出/恢复入口。两者都必须在 `mutationLock` 内执行：投影状态
      * （historyEvents / conversationItems / 水位）由后台 gateway dispatcher 持有，
      * 绕过锁会让缓存恢复与并发投影互相踩踏。

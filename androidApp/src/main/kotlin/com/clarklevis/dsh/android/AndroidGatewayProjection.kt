@@ -74,6 +74,11 @@ internal class AndroidGatewayProjection(
     private val historyHasMore = mutableMapOf<String, Boolean>()
     private val historySessionStates = mutableMapOf<String, HistorySessionState>()
     private var historyPendingSessionId: String? = null
+    /**
+     * 本进程已收到过实时帧的会话。缓存恢复只允许作为**非网络种子**：一旦该会话已有实时
+     * 内容，磁盘上的旧基线就可能倒退覆盖它，必须跳过。
+     */
+    private val liveSessionIds = mutableSetOf<String>()
     private val conversationItems = mutableMapOf<String, List<ConversationItem>>()
     private val conversationLastSequences = mutableMapOf<String, Int>()
     private var controlSnapshot = mobileStore.snapshot()
@@ -106,6 +111,15 @@ internal class AndroidGatewayProjection(
 
     /** 导出/恢复会话列表缓存；平台层负责实际磁盘 I/O。 */
     fun exportSessionCache(): String = mobileStore.exportSessionCache()
+
+    /**
+     * 该会话本进程是否已收到过实时（或宿主基线）内容。
+     *
+     * 平台层用它决定能否用磁盘缓存播种：缓存是**非网络基线**，只应在内存里还没有更权威
+     * 内容时使用。若只看 `conversation.isNotEmpty()`，会把「上一次恢复出来的缓存」误判为
+     * 实时内容，导致真正的实时数据被旧基线覆盖或反过来跳过必要的恢复。
+     */
+    fun hasLiveContent(sessionId: String): Boolean = sessionId in liveSessionIds
 
     fun restoreSessionCache(sessionsJson: String): SharedMobileSnapshot {
         controlSnapshot = mobileStore.restoreSessions(sessionsJson)
@@ -294,6 +308,9 @@ internal class AndroidGatewayProjection(
         if (frame.kind == "hello") {
             cancelSnapshotWait()
             usesAssistantStream = "assistant-stream-v1" in frame.capabilities.orEmpty()
+            // 新握手意味着后续帧来自一次全新连接：旧连接留下的实时标记不再代表
+            // 「本次会话仍有权威内容」，必须清空，否则重连后的缓存播种会被永久跳过。
+            liveSessionIds.clear()
         }
         val id = frame.sessionId ?: correlatedSessionId
         if (frame.kind == "history" && id != null && assistantStream.hasBaseline(id) &&
@@ -328,6 +345,7 @@ internal class AndroidGatewayProjection(
         if (!update.accepted) return snapshot()
         when (frame.kind) {
             "session-snapshot" -> if (id != null) {
+                liveSessionIds += id
                 historyErrors.remove(id)
                 if (snapshotWait?.first == id) snapshotWait = null
                 historyStore.clearSession(id)
@@ -432,6 +450,7 @@ internal class AndroidGatewayProjection(
         historyHasMore.clear()
         historySessionStates.clear()
         historyPendingSessionId = null
+        liveSessionIds.clear()
         conversationItems.clear()
         conversationLastSequences.clear()
         queueSessionIds = emptySet()
@@ -506,6 +525,7 @@ internal class AndroidGatewayProjection(
             return
         }
         historyErrors.remove(sessionId)
+        liveSessionIds += sessionId
         val normalized = frame.events.orEmpty().map { it.normalized(sessionId) }
         historyStore.processingStarted(sessionId, normalized.size, frame.hasMore == true)
         val result = historyStore.pageReceived(
@@ -543,6 +563,7 @@ internal class AndroidGatewayProjection(
             controlSnapshot = mobileStore.acceptFrame(rawJson)
         }
         val record = SessionEvent(sessionId, sequence, timestamp, gatewayEvent, frame.surfaceOp, frame.sourceEventSeqs)
+        liveSessionIds += sessionId
         val recordJson = adapterJson.encodeToString(record)
         val historyResult = historyStore.liveEventReceived(recordJson)
         if (!historyResult.accepted) {

@@ -76,6 +76,19 @@ SwiftUI View 仅读取 `AppStore` 状态并调用语义化 Intent 方法。Conve
 
 `androidApp` 是 Android 原生产品客户端：Compose UI 只读取状态并调用语义化 Intent；OkHttp WebSocket、DataStore/Keystore、附件缓存、前台服务与生命周期平台实现均已完成（阶段 12/13）。
 
+Android 端视觉体系为**浅色卡片 + 深色等价推导**两套，统一由 `ui/DshTheme.kt` 的
+`DshPalette`（`dshPalette()` / `LocalDshPalette`）提供语义 token（画布、卡片、次级面、
+描边、分隔线、三级文字、accent、主操作色、浮层阴影）。页面与内嵌卡片一律从该 token 取色，
+MaterialTheme.colorScheme 由同一份 palette 映射，禁止在浅色背景上硬编码白色文字；
+`if (isSystemInDarkTheme())` 只允许用于与有效配色无关的场景——凡需判断明暗（状态栏、
+毛玻璃面板）必须用 `dshPalette().isDark`，否则「界面」显式设浅色而系统为深色时会分叉。
+
+Android 顶层结构：底部五标签（任务 / 专家 / 资料库 / 定时任务 / 项目）为主导航，
+抽屉（`ui/WorkspaceDrawer.kt`）承载品牌、云端、新建任务、任务列表与账户卡；
+点击首页顶部标题区域弹出「任务运行设置」面板（`ui/DshRuntimeSettingsSheet.kt`），
+在设备（Gateway 主机）/ 工作空间 / 权限模式之间切换，均由既有 StateHolder Intent 驱动，
+不引入新的业务状态源。
+
 ## 5. 关键 Use Case
 
 ### 5.1 发送消息并接收 Agent 回复

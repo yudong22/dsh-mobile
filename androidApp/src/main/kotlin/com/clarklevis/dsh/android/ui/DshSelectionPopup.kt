@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.dropShadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.platform.LocalDensity
@@ -68,6 +66,7 @@ internal fun DshSelectionPopup(
     // 保留浮层至退场动画结束。
     if (!visibility.currentState && !visibility.targetState) return
     val density = LocalDensity.current
+    val palette = dshPalette()
     val margin = with(density) { 8.dp.roundToPx() }
     val overlap = with(density) { 12.dp.roundToPx() }
     val positionProvider = remember(margin, overlap) { SelectionPopupPositionProvider(margin, overlap) }
@@ -96,19 +95,16 @@ internal fun DshSelectionPopup(
                         shape = shape,
                         shadow = Shadow(
                             radius = 14.dp,
-                            color = Color.Black.copy(alpha = 0.17f),
+                            color = palette.floatingShadow,
                             offset = DpOffset(0.dp, 6.dp)
                         )
                     ).testTag("dsh-selection-popup"),
                     shape = shape,
-                    color = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    color = palette.surface,
+                    contentColor = palette.textPrimary,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
-                    border = BorderStroke(
-                        0.5.dp,
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
-                    )
+                    border = BorderStroke(0.5.dp, palette.cardBorder)
                 ) {
                     Column(Modifier.padding(vertical = 2.dp)) {
                         options.forEach { option ->

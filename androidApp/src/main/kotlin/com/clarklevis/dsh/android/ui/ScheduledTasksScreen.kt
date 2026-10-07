@@ -11,7 +11,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -61,6 +60,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
@@ -80,15 +80,13 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-private val scheduleBlue = Color(0xFF0A84FF)
-
 @Composable
 internal fun ScheduledTasksScreen(
     stateHolder: AndroidSharedStateHolder,
     onBack: () -> Unit,
     onOpenSession: (String) -> Unit
 ) {
-    val dark = isSystemInDarkTheme()
+    val palette = dshPalette()
     var editingTask by remember { mutableStateOf<MobileScheduledTask?>(null) }
     var deletingTask by remember { mutableStateOf<MobileScheduledTask?>(null) }
     var revealedTaskId by remember { mutableStateOf<String?>(null) }
@@ -100,30 +98,31 @@ internal fun ScheduledTasksScreen(
     }
     Column(
         Modifier.fillMaxSize()
-            .background(if (dark) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.surface)
+            .background(palette.canvas)
             .statusBarsPadding().navigationBarsPadding()
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp)
+                .testTag("scheduled-tasks-screen"),
             verticalAlignment = Alignment.CenterVertically
         ) {
             TopBarCircleButton(R.drawable.ic_back_chevron, "返回", onBack)
             Spacer(Modifier.weight(1f))
             Text("定时任务", fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground)
+                color = palette.textPrimary)
             Spacer(Modifier.weight(1f))
             Spacer(Modifier.size(46.dp))
         }
         when {
             stateHolder.scheduledTasksLoading && stateHolder.scheduledTasks.isEmpty() -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = scheduleBlue)
+                    CircularProgressIndicator(color = palette.accent)
                 }
             }
             stateHolder.scheduledTasksError != null && stateHolder.scheduledTasks.isEmpty() -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(stateHolder.scheduledTasksError.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stateHolder.scheduledTasksError.orEmpty(), color = palette.textSecondary)
                         Button(onClick = stateHolder::refreshScheduledTasks, modifier = Modifier.padding(top = 12.dp)) {
                             Text("重试")
                         }
@@ -132,7 +131,7 @@ internal fun ScheduledTasksScreen(
             }
             stateHolder.scheduledTasks.isEmpty() -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("暂无定时任务", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("暂无定时任务", color = palette.textSecondary)
                 }
             }
             else -> LazyColumn(
@@ -210,7 +209,8 @@ private fun ScheduledTaskCard(
     onDelete: () -> Unit,
     busy: Boolean
 ) {
-    val dark = isSystemInDarkTheme()
+    val palette = dshPalette()
+    val dark = palette.isDark
     var expanded by rememberSaveable(task.id) { mutableStateOf(false) }
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 0f else 180f,
@@ -276,22 +276,22 @@ private fun ScheduledTaskCard(
                         modifier = Modifier.size(50.dp)
                             .clip(CircleShape)
                             .background(
-                                MaterialTheme.colorScheme.surface.copy(alpha = if (dark) 0.82f else 0.94f),
+                                palette.surface.copy(alpha = if (dark) 0.82f else 0.94f),
                                 CircleShape
                             )
                             .border(
                                 0.8.dp,
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = if (dark) 0.18f else 0.11f),
+                                palette.cardBorder,
                                 CircleShape
                             )
                     ) {
                         Icon(painterResource(R.drawable.ic_pencil_line), contentDescription = "编辑${task.title}",
-                            modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
+                            modifier = Modifier.size(20.dp), tint = palette.textPrimary)
                     }
                     IconButton(
                         onClick = onDelete,
                         enabled = progress > 0.95f && !busy,
-                        modifier = Modifier.size(50.dp).background(Color(0xFFD65052), CircleShape)
+                        modifier = Modifier.size(50.dp).background(DshColors.Danger, CircleShape)
                     ) {
                         Icon(painterResource(R.drawable.ic_trash), contentDescription = "删除${task.title}",
                             modifier = Modifier.size(20.dp), tint = Color.White)
@@ -307,12 +307,12 @@ private fun ScheduledTaskCard(
                     shape = RoundedCornerShape(28.dp),
                     shadow = Shadow(
                         radius = 14.dp,
-                        color = Color.Black.copy(alpha = 0.08f),
+                        color = palette.floatingShadow,
                         offset = DpOffset(0.dp, 4.dp)
                     )
                 )
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(28.dp))
-                .border(0.8.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f), RoundedCornerShape(28.dp))
+                .background(palette.surface, RoundedCornerShape(28.dp))
+                .border(1.dp, palette.cardBorder, RoundedCornerShape(28.dp))
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = rememberDraggableState { delta ->
@@ -342,20 +342,20 @@ private fun ScheduledTaskCard(
                 }
                     .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 18.dp)
             ) {
-                Text(shortRule(task), fontSize = 15.sp, fontWeight = FontWeight.Medium, color = scheduleBlue)
+                Text(shortRule(task), fontSize = 15.sp, fontWeight = FontWeight.Medium, color = palette.primary)
                 Text(
                     task.title, fontSize = 21.sp, fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = palette.textPrimary,
                     modifier = Modifier.padding(top = 8.dp)
                 )
                 Text(
                     task.prompt, fontSize = 16.sp, lineHeight = 22.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.textSecondary,
                     maxLines = 3, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 11.dp)
                 )
             }
-            HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = palette.divider)
             Row(
                 Modifier.fillMaxWidth().clickable {
                     if (SystemClock.uptimeMillis() >= suppressCardTapUntil) {
@@ -367,7 +367,7 @@ private fun ScheduledTaskCard(
             ) {
                 Text(
                     if (task.status == "active") formatScheduleDate(task.scheduledAt) else "已结束",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp,
+                    color = palette.textSecondary, fontSize = 15.sp,
                     modifier = Modifier.weight(1f)
                 )
                 Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
@@ -375,7 +375,7 @@ private fun ScheduledTaskCard(
                         painter = painterResource(R.drawable.ic_chevron_up),
                         contentDescription = if (expanded) "收起任务详情" else "展开任务详情",
                         modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = chevronRotation },
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = palette.textSecondary
                     )
                 }
             }
@@ -402,10 +402,11 @@ private fun ScheduledTaskCard(
 
 @Composable
 private fun ScheduleDetail(label: String, value: String) {
+    val palette = dshPalette()
     Row(Modifier.fillMaxWidth()) {
-        Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Text(label, fontSize = 14.sp, color = palette.textSecondary,
             modifier = Modifier.size(width = 92.dp, height = 22.dp))
-        Text(value, fontSize = 14.sp, lineHeight = 20.sp, color = MaterialTheme.colorScheme.onSurface,
+        Text(value, fontSize = 14.sp, lineHeight = 20.sp, color = palette.textPrimary,
             modifier = Modifier.weight(1f))
     }
 }

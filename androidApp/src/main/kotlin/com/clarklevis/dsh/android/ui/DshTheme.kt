@@ -7,13 +7,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.graphics.Color
@@ -25,18 +26,123 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
+/**
+ * 品牌色与固定语义色。
+ *
+ * 本轮 UI 改版把界面从「深色玻璃」切换为截图所定义的浅色卡片体系，
+ * 但我方产品语义（会话/专家/资料库/定时任务/项目）保持不变；
+ * 深色模式保留为同一套语义 token 的深色推导，不删功能。
+ */
 internal object DshColors {
-    val Navy = Color(0xFF06172B)
-    val NavyRaised = Color(0xFF0D2440)
+    // 品牌/状态色：与 iOS 基准保持一致，不随明暗主题改变。
     val Ocean = Color(0xFF2E6BE6)
-    val Mist = Color(0xFFBFD6FF)
-    val Ink = Color(0xFF0E131A)
-    val Paper = Color(0xFFF9FAFC)
     val Purple = Color(0xFF7A54C7)
     val Orange = Color(0xFFF07D14)
     val Amber = Color(0xFFFFAD1F)
     val Success = Color(0xFF2EB85C)
+    val Danger = Color(0xFFFF3B30)
+
+    // 旧深色命名保留给仍在引用的实现，取值改为新体系下的等价色。
+    val Navy = Color(0xFF06172B)
+    val NavyRaised = Color(0xFF131315)
+    val Mist = Color(0xFF8B8B8B)
+    val Ink = Color(0xFF1F1F1F)
+    val Paper = Color(0xFFF8F8F8)
+
+    // 截图取色：浅色画布 / 抽屉画布 / 卡片。
+    val CanvasLight = Color(0xFFF8F8F8)
+    val DrawerLight = Color(0xFFFAFAFA)
+    val SurfaceLight = Color(0xFFFFFFFF)
+    val MutedLight = Color(0xFFF0F0F0)
+    val BorderLight = Color(0xFFEAEAEA)
+    val DividerLight = Color(0xFFEBEBEB)
+    val TextPrimaryLight = Color(0xFF1F1F1F)
+    val TextSecondaryLight = Color(0xFF8B8B8B)
+    val TextTertiaryLight = Color(0xFF9A9A9A)
+    val AccentLight = Color(0xFF1FA07E)
+
+    val CanvasDark = Color(0xFF0E0E10)
+    val DrawerDark = Color(0xFF151517)
+    val SurfaceDark = Color(0xFF1C1C1E)
+    val MutedDark = Color(0xFF26262A)
+    val BorderDark = Color(0xFF303034)
+    val DividerDark = Color(0xFF2A2A2E)
+    val TextPrimaryDark = Color(0xFFF2F2F2)
+    val TextSecondaryDark = Color(0xFF9A9A9E)
+    val TextTertiaryDark = Color(0xFF8A8A8E)
+    val AccentDark = Color(0xFF3FD0A4)
 }
+
+/**
+ * 一套语义配色 token。所有页面（首页、抽屉、对话、设置、弹层）都从这里取色，
+ * 避免再出现「深色底配黑字」这类只在单一页面修好的可读性问题。
+ */
+internal data class DshPalette(
+    val isDark: Boolean,
+    /** 页面画布底色。 */
+    val canvas: Color,
+    /** 侧边抽屉底色，比画布略亮/略暗一档以形成层次。 */
+    val drawerCanvas: Color,
+    /** 卡片、气泡、按钮等前景表面。 */
+    val surface: Color,
+    /** 次级表面：标签、次级按钮、输入框占位底。 */
+    val surfaceMuted: Color,
+    /** 描边。 */
+    val border: Color,
+    /** 列表分隔线。 */
+    val divider: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val textTertiary: Color,
+    /** 品牌强调色：账户头像、成功态点睛。 */
+    val accent: Color,
+    /** 主操作色：发送键、选中态。 */
+    val primary: Color
+) {
+    /** 覆盖在 canvas 上的浮层阴影，浅色下更淡。 */
+    val floatingShadow: Color get() = Color.Black.copy(alpha = if (isDark) 0.42f else 0.08f)
+
+    /** 卡片描边：浅色下几乎不可见，深色下用更亮的边。 */
+    val cardBorder: Color get() = border
+}
+
+internal object DshPalettes {
+    val Light = DshPalette(
+        isDark = false,
+        canvas = DshColors.CanvasLight,
+        drawerCanvas = DshColors.DrawerLight,
+        surface = DshColors.SurfaceLight,
+        surfaceMuted = DshColors.MutedLight,
+        border = DshColors.BorderLight,
+        divider = DshColors.DividerLight,
+        textPrimary = DshColors.TextPrimaryLight,
+        textSecondary = DshColors.TextSecondaryLight,
+        textTertiary = DshColors.TextTertiaryLight,
+        accent = DshColors.AccentLight,
+        primary = DshColors.Ocean
+    )
+
+    val Dark = DshPalette(
+        isDark = true,
+        canvas = DshColors.CanvasDark,
+        drawerCanvas = DshColors.DrawerDark,
+        surface = DshColors.SurfaceDark,
+        surfaceMuted = DshColors.MutedDark,
+        border = DshColors.BorderDark,
+        divider = DshColors.DividerDark,
+        textPrimary = DshColors.TextPrimaryDark,
+        textSecondary = DshColors.TextSecondaryDark,
+        textTertiary = DshColors.TextTertiaryDark,
+        accent = DshColors.AccentDark,
+        primary = Color(0xFF7EA8FF)
+    )
+}
+
+internal val LocalDshPalette = staticCompositionLocalOf { DshPalettes.Light }
+
+/** 当前有效配色。ViewModel/纯函数请显式传参，Composable 内直接调用。 */
+@Composable
+internal fun dshPalette(): DshPalette = LocalDshPalette.current
 
 @Composable
 internal fun StatusIndicatorDot(
@@ -60,23 +166,37 @@ internal fun StatusIndicatorDot(
     Box(decoratedModifier.background(color, CircleShape))
 }
 
-private val LightColors = lightColorScheme(
-    primary = DshColors.Ocean,
-    secondary = DshColors.Purple,
-    background = DshColors.Paper,
-    surface = Color.White,
-    onBackground = DshColors.Ink,
-    onSurface = DshColors.Ink
-)
-
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFF7EA8FF),
-    secondary = Color(0xFFB69BFF),
-    background = Color(0xFF090D13),
-    surface = Color(0xFF111720),
-    onBackground = Color(0xFFF1F4FA),
-    onSurface = Color(0xFFF1F4FA)
-)
+private fun paletteColorScheme(palette: DshPalette) = if (palette.isDark) {
+    darkColorScheme(
+        primary = palette.primary,
+        onPrimary = Color.White,
+        secondary = DshColors.Purple,
+        background = palette.canvas,
+        onBackground = palette.textPrimary,
+        surface = palette.surface,
+        onSurface = palette.textPrimary,
+        surfaceVariant = palette.surfaceMuted,
+        onSurfaceVariant = palette.textSecondary,
+        outline = palette.border,
+        outlineVariant = palette.divider,
+        error = DshColors.Danger
+    )
+} else {
+    lightColorScheme(
+        primary = palette.primary,
+        onPrimary = Color.White,
+        secondary = DshColors.Purple,
+        background = palette.canvas,
+        onBackground = palette.textPrimary,
+        surface = palette.surface,
+        onSurface = palette.textPrimary,
+        surfaceVariant = palette.surfaceMuted,
+        onSurfaceVariant = palette.textSecondary,
+        outline = palette.border,
+        outlineVariant = palette.divider,
+        error = DshColors.Danger
+    )
+}
 
 @Composable
 internal fun DshTheme(
@@ -103,12 +223,14 @@ internal fun DshTheme(
         }
     }
     // 所有页面的深浅色判断使用同一份有效配置，避免只更新 MaterialTheme 而留下浅色背景。
+    val palette = if (dark) DshPalettes.Dark else DshPalettes.Light
     CompositionLocalProvider(
         LocalAppearanceSettings provides appearance,
         LocalAgentNotificationSettings provides notifications,
+        LocalDshPalette provides palette,
         LocalConfiguration provides configuration
     ) {
-        MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) {
+        MaterialTheme(colorScheme = paletteColorScheme(palette)) {
             CompositionLocalProvider(LocalRippleConfiguration provides null, content = content)
         }
     }

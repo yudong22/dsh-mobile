@@ -73,10 +73,75 @@ class AndroidGatewayProjectionTest {
         cold.close()
     }
 
+    /**
+     * 实时标记：只有本进程真正收到过该会话的权威内容才为真。
+     * 缓存恢复本身**不得**把自己标记成实时内容，否则下一次切回该会话时会跳过恢复，
+     * 或用旧基线覆盖已经更新的实时数据。
+     */
+    @Test
+    fun liveContentMarkerTracksAuthoritativeFramesNotCacheSeeding() {
+        val projection = AndroidGatewayProjection()
+        assertFalse(projection.hasLiveContent("s"))
+
+        projection.selectSession("s")
+        assertFalse("选中会话不构成实时内容", projection.hasLiveContent("s"))
+
+        val payload = """{"schema":1,"sessionId":"s","lastSequence":1,"events":[
+            {"sessionId":"s","seq":1,"time":100,"event":{"type":"user/message","text":"缓存内容"}}
+        ]}"""
+        projection.restoreConversationCache("s", payload)
+        assertEquals(listOf("缓存内容"), projection.snapshot().conversation.map { it.text })
+        assertFalse("缓存播种不是实时内容", projection.hasLiveContent("s"))
+
+        val live = """{"kind":"event","sessionId":"s","seq":2,"time":101,"event":{"type":"user/message","text":"实时内容"}}"""
+        projection.acceptFrame(live, GatewayWireDecoder.decode(live), "s")
+        assertTrue("实时事件之后才算已有权威内容", projection.hasLiveContent("s"))
+
+        assertFalse("其他会话不受影响", projection.hasLiveContent("other"))
+        projection.close()
+    }
+
+    /**
+     * 宿主 history 基线属于权威内容，必须置位实时标记。
+     *
+     * `session-snapshot` 走同一条 `liveSessionIds += id` 路径，但只有建立了订阅
+     * （hello + subscribed 握手）后才会被 `AssistantStreamState` 接受，因此不在单测里
+     * 构造那套握手状态。
+     */
+    @Test
+    fun hostHistoryBaselineMarksSessionWithLiveContent() {
+        val history = AndroidGatewayProjection()
+        history.selectSession("s")
+        val page = """{"kind":"history","sessionId":"s","events":[
+            {"type":"user/message","seq":1,"time":100,"data":{"content":[{"type":"text","text":"基线"}]}}
+        ],"hasMore":false,"bytes":64}"""
+        history.acceptFrame(page, GatewayWireDecoder.decode(page), "s")
+        assertTrue(history.hasLiveContent("s"))
+        assertEquals(listOf("基线"), history.snapshot().conversation.map { it.text })
+        history.close()
+    }
+
+    /**
+     * 重新握手意味着换了一次连接：旧标记必须清空，否则重连后缓存播种会被永久跳过，
+     * 该会话在 history 帧回来前一直是空屏。
+     */
+    @Test
+    fun newHandshakeClearsLiveMarkerSoCacheCanSeedAgain() {
+        val projection = AndroidGatewayProjection()
+        projection.selectSession("s")
+        val live = """{"kind":"event","sessionId":"s","seq":1,"time":100,"event":{"type":"user/message","text":"旧连接"}}"""
+        projection.acceptFrame(live, GatewayWireDecoder.decode(live), "s")
+        assertTrue(projection.hasLiveContent("s"))
+
+        val hello = """{"kind":"hello","authenticated":true}"""
+        projection.acceptFrame(hello, GatewayWireDecoder.decode(hello), null)
+        assertFalse("新握手后不再持有旧连接的实时标记", projection.hasLiveContent("s"))
+        projection.close()
+    }
+
     /** 损坏或不匹配的缓存必须安全忽略，不能污染会话或触发 fail-closed。 */
     @Test
-    fun conversationCacheRejectsCorruptAndForeignPayloads() {
-        val projection = AndroidGatewayProjection()
+    fun conversationCacheRejectsCorruptAndForeignPayloads() {        val projection = AndroidGatewayProjection()
         projection.selectSession("s")
         projection.restoreConversationCache("s", "not-json")
         projection.restoreConversationCache("s", """{"schema":99,"sessionId":"s","lastSequence":1,"events":[]}""")

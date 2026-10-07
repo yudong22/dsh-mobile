@@ -349,6 +349,7 @@ internal fun buildDshMarkwon(
             TaskListPlugin.create(
                 DshColors.Ocean.toArgb(),
                 palette.taskOutlineColor,
+                // 勾选标记画在品牌色实心方块上，与明暗主题无关，保持白色。
                 Color.White.toArgb()
             )
         )
@@ -381,6 +382,17 @@ internal class DshInlineCodeSpan(
 }
 
 internal class DshMarkdownTextView(context: Context) : AppCompatTextView(context) {
+    /**
+     * 每帧绘制都会走 [onDraw]，因此这里的 Paint 必须复用：行内代码在长会话里可能有几十段，
+     * 每段每帧新建 TextPaint/Paint 会持续触发 GC，直接表现为滚动掉帧。
+     * 这些 Paint 只在 `onDraw` 内使用，不跨线程，复用是安全的。
+     */
+    private val inlineCodePaint = TextPaint()
+    private val inlineCodeBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    private val rect = RectF()
+
     override fun onDraw(canvas: Canvas) {
         drawInlineCodeBackgrounds(canvas)
         super.onDraw(canvas)
@@ -413,11 +425,13 @@ internal class DshMarkdownTextView(context: Context) : AppCompatTextView(context
         val spanEnd = spanned.getSpanEnd(span)
         if (spanStart < 0 || spanEnd <= spanStart) return
 
-        val codePaint = TextPaint(paint).also(span::updateDrawState)
+        val codePaint = inlineCodePaint.apply {
+            set(paint)
+            span.updateDrawState(this)
+        }
         val fontMetrics = codePaint.fontMetrics
-        val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val backgroundPaint = inlineCodeBackgroundPaint.apply {
             color = span.backgroundColor
-            style = Paint.Style.FILL
         }
         val firstLine = textLayout.getLineForOffset(spanStart)
         val lastLine = textLayout.getLineForOffset((spanEnd - 1).coerceAtLeast(spanStart))
@@ -439,8 +453,9 @@ internal class DshMarkdownTextView(context: Context) : AppCompatTextView(context
                 .coerceAtLeast(textLayout.getLineTop(line).toFloat())
             val bottom = (baseline + fontMetrics.descent + span.verticalPaddingPx)
                 .coerceAtMost(textLayout.getLineBottom(line).toFloat())
+            rect.set(left, top, right, bottom)
             canvas.drawRoundRect(
-                RectF(left, top, right, bottom),
+                rect,
                 span.cornerRadiusPx,
                 span.cornerRadiusPx,
                 backgroundPaint

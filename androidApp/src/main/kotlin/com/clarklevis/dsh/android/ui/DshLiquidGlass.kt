@@ -3,7 +3,6 @@ package com.clarklevis.dsh.android.ui
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.runtime.Composable
@@ -170,10 +169,13 @@ internal val LocalDshGlassFrameSignal = staticCompositionLocalOf<MutableLongStat
 internal fun Modifier.dshFrostedSheet(shape: Shape): Modifier {
     val backdrop = LocalDshSheetBackdrop.current
     val frameSignal = LocalDshGlassFrameSignal.current
-    val dark = isSystemInDarkTheme()
-    val tint = if (dark) Color(0xFF22252C) else Color(0xFFE8EDF5)
+    // 必须用有效配色而不是系统主题：用户把「界面」设为浅色而系统为深色时，
+    // isSystemInDarkTheme() 会与实际渲染的 palette 分叉，导致浅色页面上盖一层深色面板。
+    val palette = dshPalette()
+    val dark = palette.isDark
+    val tint = palette.surfaceMuted
     val surface = if (backdrop == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        background(tint.copy(alpha = 0.92f), shape)
+        background(tint.copy(alpha = 0.96f), shape)
     } else {
         drawWithContent {
             frameSignal?.longValue
@@ -182,8 +184,8 @@ internal fun Modifier.dshFrostedSheet(shape: Shape): Modifier {
             backdrop = backdrop,
             shape = { shape },
             effects = { blur(24.dp.toPx()) },
-            onDrawSurface = { drawRect(tint.copy(alpha = if (dark) 0.76f else 0.68f)) }
+            onDrawSurface = { drawRect(tint.copy(alpha = if (dark) 0.86f else 0.82f)) }
         )
     }
-    return surface.clip(shape).border(0.8.dp, Color.White.copy(alpha = if (dark) 0.12f else 0.35f), shape)
+    return surface.clip(shape).border(0.8.dp, palette.cardBorder, shape)
 }
