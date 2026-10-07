@@ -47,6 +47,10 @@ class AssistantStreamState {
     private val cursors = mutableMapOf<String, Int>()
     private var helloFormat: Int? = null
     private var enabled = false
+    /** transient 轨迹的长期 projector 与已折叠游标；见 [transientTrajectoryNodes]。 */
+    private var transientProjector = ConversationProjector()
+    private var transientProjectorAttemptId: String? = null
+    private var transientFoldedChunkCount = 0
 
     fun selectSession(sessionId: String?) {
         selectedSessionId = sessionId
@@ -69,11 +73,28 @@ class AssistantStreamState {
 
     fun replayChunksJson(): String = wireJson.encodeToString(chunks)
 
+    /**
+     * 轨迹页存活时每帧都会调用本方法。此前每次新建 [ConversationProjector] 并重放**全部**
+     * chunk，使整轮成本退化为 O(tokens²)。这里保留长期 projector 与已折叠游标，只 fold 新增
+     * chunk；[clearAttempt] 会重置它们，保证与 chunks 生命周期一致。
+     */
     fun transientTrajectoryNodes(sessionId: String): List<TrajectoryNode> {
         if (!hasBaseline(sessionId)) return emptyList()
         val attemptId = activeAttemptId() ?: return emptyList()
-        val projector = ConversationProjector()
-        projector.foldAssistantChunks(attemptId, chunks)
+        if (transientProjectorAttemptId != attemptId || transientFoldedChunkCount > chunks.size) {
+            // 新 attempt，或 chunks 被替换成更短的前缀（重新订阅后同 attempt 重放）：从头重来。
+            transientProjector = ConversationProjector()
+            transientProjectorAttemptId = attemptId
+            transientFoldedChunkCount = 0
+        }
+        if (transientFoldedChunkCount < chunks.size) {
+            transientProjector.foldAssistantChunks(
+                attemptId,
+                chunks.subList(transientFoldedChunkCount, chunks.size)
+            )
+            transientFoldedChunkCount = chunks.size
+        }
+        val projector = transientProjector
         // 轨迹使用真实的生成起点作锚；records 为空，临时 chunk 不伪装成 SessionEvent。
         val anchor = attempt?.long("startedAfterSeq")?.toInt() ?: cursors[sessionId] ?: -1
         return projector.items.map { item ->
@@ -288,6 +309,9 @@ class AssistantStreamState {
         chunks.clear()
         nextIndex = 0
         committed = null
+        transientProjector = ConversationProjector()
+        transientProjectorAttemptId = null
+        transientFoldedChunkCount = 0
     }
 
     private fun fail(id: String?, message: String): AssistantStreamUpdate {

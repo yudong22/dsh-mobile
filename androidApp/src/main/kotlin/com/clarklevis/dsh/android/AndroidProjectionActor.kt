@@ -31,6 +31,12 @@ internal class AndroidProjectionActor(
     private var activeSnapshotWait: Pair<String, Long>? = null
     private var pendingStreamingFrame: PendingStreamingFrame? = null
     private var lastStreamingFlushNanos = 0L
+    /**
+     * 快通道 `assistant-stream` 的待提交帧。与 legacy 通道不同，这里**不能**合并帧内容：
+     * `AssistantStreamState` 要求 revision 逐帧连续，丢帧会触发重订阅。因此仅按时间/条数
+     * 聚合一批帧，交给投影逐帧 accept、统一下游提交。
+     */
+    private var pendingAssistantStreamFrames: MutableList<PendingAssistantStreamFrame>? = null
 
     val initialSnapshot: SharedMobileSnapshot = projection.snapshot()
 
@@ -39,10 +45,58 @@ internal class AndroidProjectionActor(
         frame: GatewayFrame,
         correlatedSessionId: String?,
         afterPublish: () -> Unit = {}
-    ) = mutate(
-        afterPublish = afterPublish,
-        coalesceWithDisplayFrame = frame.kind == "assistant-stream" || (frame.kind == "event" && frame.event?.type == "assistant/chunk")
-    ) { projection.acceptFrame(rawJson, frame, correlatedSessionId) }
+    ): Boolean = mutationLock.withLock {
+        if (!frame.isBatchableAssistantStreamFrame()) {
+            flushPendingAssistantStreamFramesLocked()
+            publishMutationLocked(
+                projection.acceptFrame(rawJson, frame, correlatedSessionId),
+                coalesceWithDisplayFrame = frame.kind == "assistant-stream" ||
+                    (frame.kind == "event" && frame.event?.type == "assistant/chunk"),
+                afterPublish = afterPublish
+            )
+            return@withLock true
+        }
+        val pending = pendingAssistantStreamFrames
+            ?: mutableListOf<PendingAssistantStreamFrame>().also { pendingAssistantStreamFrames = it }
+        // 同一批必须属于同一 session，避免把不同会话的帧混在一次提交里。
+        if (pending.isNotEmpty() && pending.last().frame.sessionId != frame.sessionId) {
+            flushPendingAssistantStreamFramesLocked()
+        }
+        requireNotNull(pendingAssistantStreamFrames)
+            .add(PendingAssistantStreamFrame(rawJson, frame, correlatedSessionId, afterPublish))
+        val now = nowNanos()
+        val shouldFlush = requireNotNull(pendingAssistantStreamFrames).size >= MAXIMUM_STREAMING_BATCH_SIZE ||
+            now - lastStreamingFlushNanos >= STREAMING_PROJECTION_INTERVAL_NANOS
+        if (shouldFlush) {
+            flushPendingAssistantStreamFramesLocked()
+            lastStreamingFlushNanos = now
+            return@withLock true
+        }
+        // 本帧已缓冲但尚未提交：调用方不应在此刻读取会话内容（与 legacy 合批语义一致）。
+        return@withLock false
+    }
+
+    private suspend fun flushPendingAssistantStreamFramesLocked() {
+        val frames = pendingAssistantStreamFrames ?: return
+        pendingAssistantStreamFrames = null
+        if (frames.isEmpty()) return
+        publishMutationLocked(
+            projection.acceptAssistantStreamBatch(
+                frames.map { it.rawJson to it.frame },
+                frames.last().correlatedSessionId
+            ),
+            coalesceWithDisplayFrame = true
+        )
+        // 批内每帧的 afterPublish 都必须执行，否则会丢掉附件清理等副作用。
+        frames.forEach { it.afterPublish() }
+    }
+
+    private data class PendingAssistantStreamFrame(
+        val rawJson: String,
+        val frame: GatewayFrame,
+        val correlatedSessionId: String?,
+        val afterPublish: () -> Unit
+    )
 
     /**
      * 将同一步骤的微小文本 token 合成一次增量投影。Runtime 仍无损处理每个协议帧；这里只
@@ -139,6 +193,7 @@ internal class AndroidProjectionActor(
 
     suspend fun trajectory(sessionId: String?): List<TrajectoryNode> = mutationLock.withLock {
         flushPendingStreamingFrameLocked()
+        flushPendingAssistantStreamFramesLocked()
         projection.trajectory(sessionId)
     }
 
@@ -176,6 +231,7 @@ internal class AndroidProjectionActor(
      */
     suspend fun exportConversationCache(sessionId: String): String? = mutationLock.withLock {
         flushPendingStreamingFrameLocked()
+        flushPendingAssistantStreamFramesLocked()
         projection.exportConversationCache(sessionId)
     }
 
@@ -204,6 +260,7 @@ internal class AndroidProjectionActor(
     ) {
         mutationLock.withLock {
             flushPendingStreamingFrameLocked()
+            flushPendingAssistantStreamFramesLocked()
             val next = mutation()
             publishMutationLocked(next, coalesceWithDisplayFrame, afterPublish)
         }
@@ -216,6 +273,11 @@ internal class AndroidProjectionActor(
             projection.acceptFrame(pending.rawJson, pending.frame, pending.correlatedSessionId),
             coalesceWithDisplayFrame = true
         )
+    }
+
+    private fun GatewayFrame.isBatchableAssistantStreamFrame(): Boolean {
+        if (kind != "assistant-stream") return false
+        return frame?.objectValue?.get("type")?.stringValue == "chunk"
     }
 
     private suspend fun publishMutationLocked(

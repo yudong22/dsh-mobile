@@ -20,6 +20,7 @@ import com.clarklevis.dsh.shared.protocol.GatewayFrame
 import com.clarklevis.dsh.shared.protocol.GatewayPendingApprovalRequest
 import com.clarklevis.dsh.shared.protocol.JsonValue
 import com.clarklevis.dsh.shared.protocol.SessionEvent
+import com.clarklevis.dsh.shared.sync.AssistantChunk
 import com.clarklevis.dsh.shared.sync.AssistantStreamState
 import com.clarklevis.dsh.shared.sync.HistorySessionState
 import com.clarklevis.dsh.shared.sync.HistorySyncConfiguration
@@ -54,6 +55,14 @@ internal class AndroidGatewayProjection(
     private var waitGeneration = 0L
     var snapshotWait: Pair<String, Long>? = null
         private set
+    /**
+     * 快通道 `assistant-stream` 的 `revision` 必须逐帧 +1（`AssistantStreamState.acceptStream`），
+     * 否则会触发重订阅。因此合批不改逐帧调用，只折叠下游昂贵链路。
+     */
+    private var isBatchingAssistantChunks = false
+    private val pendingAssistantChunks = mutableListOf<AssistantChunk>()
+    private var pendingAssistantSessionId: String? = null
+    private var pendingAssistantAttemptId: String? = null
     private val historyEvents = mutableMapOf<String, List<SessionEvent>>()
     private var trajectoryHistorySessionId: String? = null
     private var trajectoryHistoryEvents: List<SessionEvent>? = null
@@ -245,6 +254,9 @@ internal class AndroidGatewayProjection(
 
     fun acceptFrame(rawJson: String, frame: GatewayFrame, correlatedSessionId: String?): SharedMobileSnapshot {
         lastFrameKind = frame.kind
+        // 非快通道帧（含 assistant/message 终帧、history、session-snapshot、错误等）必须先落地
+        // 已缓冲的 chunk，否则终帧会先于最后一段文本进入投影，出现丢字或顺序颠倒。
+        if (!frame.isAssistantStreamChunk()) flushAssistantChunks()
         if (frame.kind == "session-queues" && frame.queues != null) {
             val queues = requireNotNull(frame.queues)
             (queueSessionIds + queues.keys).forEach { sessionId ->
@@ -316,13 +328,74 @@ internal class AndroidGatewayProjection(
             }
         }
         if (id != null && update.attemptId != null && update.chunksJson != "[]") {
-            conversationStore.assistantChunks(id, requireNotNull(update.attemptId), update.chunksJson)
+            bufferAssistantChunks(id, requireNotNull(update.attemptId), update.chunksJson)
         }
         return snapshot()
     }
 
+    /**
+     * 批量接受快通道帧：内部**逐帧**调用 [acceptFrame]，因此 `revision`/`index` 仍逐帧连续
+     * （快通道的硬约束，否则会触发重订阅）；被折叠的只是下游昂贵链路
+     * 「chunk -> ConversationStore -> MVI patch -> 投影规划」。中间快照一律丢弃，
+     * 只在最后 flush 一次并返回最终快照。
+     */
+    fun acceptAssistantStreamBatch(
+        frames: List<Pair<String, GatewayFrame>>,
+        correlatedSessionId: String?
+    ): SharedMobileSnapshot {
+        if (frames.isEmpty()) return snapshot()
+        isBatchingAssistantChunks = true
+        try {
+            frames.forEach { (rawJson, frame) -> acceptFrame(rawJson, frame, correlatedSessionId) }
+        } finally {
+            isBatchingAssistantChunks = false
+            // 即使中途抛异常也必须落地，否则缓冲会跨调用泄漏到下一次批量。
+            flushAssistantChunks()
+        }
+        return snapshot()
+    }
+
+    /** 累积快通道 chunk；未处于批量模式时立即提交，保持 [acceptFrame] 的同步语义。 */
+    private fun bufferAssistantChunks(sessionId: String, attemptId: String, chunksJson: String) {
+        val chunks = runCatching { adapterJson.decodeFromString<List<AssistantChunk>>(chunksJson) }
+            .getOrElse {
+                // 解析失败：先落地已缓冲内容，再按原语义同步提交本帧。
+                flushAssistantChunks()
+                conversationStore.assistantChunks(sessionId, attemptId, chunksJson)
+                return
+            }
+        if (pendingAssistantSessionId != sessionId || pendingAssistantAttemptId != attemptId) {
+            flushAssistantChunks()
+            pendingAssistantSessionId = sessionId
+            pendingAssistantAttemptId = attemptId
+        }
+        pendingAssistantChunks += chunks
+        if (!isBatchingAssistantChunks) flushAssistantChunks()
+    }
+
+    /** 把缓冲的 chunk 一次性交给共享 Conversation Store；无缓冲时为 no-op。 */
+    private fun flushAssistantChunks() {
+        val sessionId = pendingAssistantSessionId
+        val attemptId = pendingAssistantAttemptId
+        if (sessionId == null || attemptId == null || pendingAssistantChunks.isEmpty()) {
+            pendingAssistantChunks.clear()
+            pendingAssistantSessionId = null
+            pendingAssistantAttemptId = null
+            return
+        }
+        val chunksJson = adapterJson.encodeToString(pendingAssistantChunks.toList())
+        pendingAssistantChunks.clear()
+        pendingAssistantSessionId = null
+        pendingAssistantAttemptId = null
+        conversationStore.assistantChunks(sessionId, attemptId, chunksJson)
+    }
+
     fun reset(): SharedMobileSnapshot {
         cancelSnapshotWait()
+        // 丢弃未提交的 chunk 缓冲，避免旧 attempt 的内容泄漏到 reset 之后。
+        pendingAssistantChunks.clear()
+        pendingAssistantSessionId = null
+        pendingAssistantAttemptId = null
         assistantStream = AssistantStreamState()
         usesAssistantStream = false
         (historyEvents.keys + queueSessionIds).toSet().forEach {
@@ -602,7 +675,9 @@ internal class AndroidGatewayProjection(
     }
 
     private fun planConversationEvent(event: SharedMviEvent): ConversationPlan {
-        require(adapterJson.decodeFromString<List<SharedHistoryEffect>>(event.effectsJson).isEmpty())
+        // Conversation 路径的 effectsJson 恒为 "[]"（SharedConversationStore.dispatch 不传该字段）。
+        // 逐 token 反序列化一个必然为空的数组是纯浪费，改为字符串比较。
+        require(event.effectsJson.isBlank() || event.effectsJson == "[]")
         if (event.kind == "error") {
             require(event.statePayloadJson == null && !event.errorCode.isNullOrBlank())
             return ConversationPlan(conversationItems.toMap(), conversationLastSequences.toMap())
@@ -638,33 +713,46 @@ internal class AndroidGatewayProjection(
         require(patch.lastSequence >= previousSequence)
         require(patch.operations.isNotEmpty() || patch.lastSequence > previousSequence)
         val items = next[patch.sessionId].orEmpty().toMutableList()
+        // 流式 append-text 每 token 触发一次；线性 indexOfFirst 会让单会话成本退化为
+        // O(行数) × O(token)。这里维护 id -> index 索引，把定位降到 O(1)。
+        val indexById = HashMap<String, Int>(items.size * 2)
+        items.forEachIndexed { index, item -> indexById[item.id] = index }
         patch.operations.forEach { operation ->
             when (operation.kind) {
                 "insert" -> {
                     val item = requireNotNull(operation.item)
                     require(operation.itemId == null && operation.delta == null)
-                    require(items.none { it.id == item.id })
+                    require(!indexById.containsKey(item.id))
+                    indexById[item.id] = items.size
                     items += item
                 }
                 "append-text" -> {
                     require(operation.item == null && !operation.itemId.isNullOrBlank() && operation.delta != null)
-                    val index = items.indexOfFirst { it.id == operation.itemId }
-                    require(index >= 0)
-                    items[index] = items[index].copy(
-                        text = items[index].text + operation.delta,
-                        epochSeconds = operation.epochSeconds ?: items[index].epochSeconds
+                    val itemId = requireNotNull(operation.itemId)
+                    val index = indexById[itemId]
+                    requireNotNull(index) { "append-text 目标行不存在" }
+                    val old = items[index]
+                    items[index] = old.copy(
+                        text = old.text + operation.delta,
+                        epochSeconds = operation.epochSeconds ?: old.epochSeconds
                     )
                 }
                 "replace" -> {
                     val item = requireNotNull(operation.item)
                     require(operation.itemId == item.id && operation.delta == null && operation.epochSeconds == null)
-                    val index = items.indexOfFirst { it.id == item.id }
-                    require(index >= 0)
+                    val index = indexById[item.id]
+                    requireNotNull(index) { "replace 目标行不存在" }
                     items[index] = item
                 }
                 "remove" -> {
                     require(operation.item == null && !operation.itemId.isNullOrBlank() && operation.delta == null)
-                    require(items.removeAll { it.id == operation.itemId })
+                    val itemId = requireNotNull(operation.itemId)
+                    val index = indexById.remove(itemId)
+                    requireNotNull(index) { "remove 目标行不存在" }
+                    items.removeAt(index)
+                    // 删除会令其后所有下标左移；remove 在流式路径上罕见，重建即可。
+                    indexById.clear()
+                    items.forEachIndexed { shiftedIndex, item -> indexById[item.id] = shiftedIndex }
                 }
                 else -> error("unknown conversation operation")
             }
@@ -692,6 +780,14 @@ internal class AndroidGatewayProjection(
             "none", "request-page", "stopped", "completed", "failed"
         )
     }
+}
+
+
+/** 快通道文本增量；只有这类帧允许延迟合批，其余帧一律先 flush 以保序。 */
+internal fun GatewayFrame.isAssistantStreamChunk(): Boolean {
+    if (kind != "assistant-stream") return false
+    val value = frame?.objectValue ?: return false
+    return value["type"]?.stringValue == "chunk"
 }
 
 private fun mobileConversationLabels(): ConversationProjectionLabels {

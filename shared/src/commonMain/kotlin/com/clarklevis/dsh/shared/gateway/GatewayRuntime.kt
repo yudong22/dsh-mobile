@@ -1175,7 +1175,12 @@ class GatewayRuntime(
         private const val MAXIMUM_OUTGOING_IMAGE_COUNT = 4
         private const val MAXIMUM_OUTGOING_IMAGE_CHARACTERS = 4_893_356
         private const val MAXIMUM_OUTGOING_TOTAL_BASE64_CHARACTERS = 16L * 1_024 * 1_024
-        private const val MAXIMUM_RUNTIME_EVENT_COUNT = 8
+        /**
+         * 队列只容 8 个事件时，60 tok/s 的流式会让生产者在 `entries.send` 上持续挂起，
+         * 对 WebSocket collector 形成反压、抬高输入延迟。放宽到 256，并用 48 MiB 字节预算
+         * 作为真正的内存兜底（大 history 帧仍会被字节预算挡住）。
+         */
+        private const val MAXIMUM_RUNTIME_EVENT_COUNT = 256
         private const val MAXIMUM_RUNTIME_EVENT_BYTES = 48L * 1_024 * 1_024
         private const val FRAME_RETENTION_MULTIPLIER = 3L
         private const val FRAME_OBJECT_OVERHEAD_BYTES = 4_096L

@@ -225,6 +225,55 @@ class AssistantStreamStateTest {
         assertEquals("Code access", snapshot.permissionDefaultOptions.last().description)
     }
 
+    /**
+     * transient 轨迹曾每次重建 projector 并重放全部 chunk（O(tokens²)）。增量折叠必须与
+     * 「每次全量重放」的参考结果逐次一致，否则轨迹页会显示过期或缺失的行。
+     */
+    @Test
+    fun transientTrajectoryIncrementalFoldMatchesFullReplay() {
+        val state = subscribed()
+        state.acceptJson(snapshot())
+
+        var expected = ConversationProjector().apply {
+            foldAssistantChunks("s:1", decode(state.replayChunksJson()))
+        }.items
+        assertEquals(expected.map { it.text }, state.transientTrajectoryNodes("s").map { it.subtitle })
+
+        // 连续多个 delta：每次都应与「从头全量重放」等价，且不重复累计文本。
+        // revision/index 必须逐帧连续（快通道的硬约束）：快照停在 revision 2 / index 1，
+        // 因此首帧为 3/1，随后 4/2、5/3。
+        repeat(3) { round ->
+            state.acceptJson(
+                chunk()
+                    .replace("\"revision\":3", "\"revision\":${3 + round}")
+                    .replace("\"index\":1", "\"index\":${1 + round}")
+            )
+            expected = ConversationProjector().apply {
+                foldAssistantChunks("s:1", decode(state.replayChunksJson()))
+            }.items
+            assertEquals(
+                expected.map { it.text },
+                state.transientTrajectoryNodes("s").map { it.subtitle },
+                "round $round 的增量折叠结果与全量重放不一致"
+            )
+        }
+        // 快照已含 "Hello"，再加 3 个 " world"。
+        assertEquals("Hello world world world", state.transientTrajectoryNodes("s").last().subtitle)
+    }
+
+    /** attempt 切换或流结束时，增量缓存必须随 chunks 一起失效，不能残留旧轨迹。 */
+    @Test
+    fun transientTrajectoryResetsWithAttempt() {
+        val state = subscribed()
+        state.acceptJson(snapshot())
+        state.acceptJson(chunk())
+        assertTrue(state.transientTrajectoryNodes("s").isNotEmpty())
+
+        assertTrue(state.acceptJson(end()).clearTransient)
+        assertEquals("[]", state.replayChunksJson())
+        assertTrue(state.transientTrajectoryNodes("s").isEmpty())
+    }
+
     private fun decode(json: String) = wireJson.decodeFromString<List<AssistantChunk>>(json)
     private val ack = """{"kind":"subscribed","sessionId":"s","subscriptionId":"sub","assistantStream":true}"""
     private fun snapshot(stream: String = "stream", cursor: Int = 41) =

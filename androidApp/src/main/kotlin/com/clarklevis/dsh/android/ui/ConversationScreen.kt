@@ -92,6 +92,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -740,22 +741,29 @@ private fun ConversationTimeline(
         }
     }
     val markdownPreloader = rememberDshMarkdownPreloader()
-    LaunchedEffect(listState, timelineEntries, markdownPreloader) {
+    // 预取 effect 只能以「结构」为 key。此前用 timelineEntries 本身作 key，而它每个 token
+    // 都是新实例，导致每 token 取消并重启 snapshotFlow、并重置 distinctUntilChanged 状态。
+    // 现在只依赖行数与预取器，最新列表内容经 rememberUpdatedState 读取。
+    val latestTimelineEntries by rememberUpdatedState(timelineEntries)
+    val latestActiveStreamingMessageId by rememberUpdatedState(activeStreamingMessageId)
+    val timelineEntryCount = timelineEntries.size
+    LaunchedEffect(listState, timelineEntryCount, markdownPreloader) {
         snapshotFlow {
             val visible = listState.layoutInfo.visibleItemsInfo
-            val first = visible.firstOrNull()?.index ?: timelineEntries.lastIndex
-            val last = visible.lastOrNull()?.index ?: timelineEntries.lastIndex
+            val first = visible.firstOrNull()?.index ?: latestTimelineEntries.lastIndex
+            val last = visible.lastOrNull()?.index ?: latestTimelineEntries.lastIndex
             first to last
         }
             .distinctUntilChanged()
             .collectLatest { (first, last) ->
+                val entries = latestTimelineEntries
                 val start = (first - MARKDOWN_PREFETCH_ROWS).coerceAtLeast(0)
-                val end = (last + MARKDOWN_PREFETCH_ROWS).coerceAtMost(timelineEntries.lastIndex)
+                val end = (last + MARKDOWN_PREFETCH_ROWS).coerceAtMost(entries.lastIndex)
                 if (start <= end) {
                     markdownPreloader.preload(
-                        timelineEntries.subList(start, end + 1)
+                        entries.subList(start, end + 1)
                             .filterIsInstance<ConversationTimelineEntry.AssistantMarkdown>()
-                            .filterNot { it.messageId == activeStreamingMessageId }
+                            .filterNot { it.messageId == latestActiveStreamingMessageId }
                             .map(ConversationTimelineEntry.AssistantMarkdown::markdown)
                     )
                 }
