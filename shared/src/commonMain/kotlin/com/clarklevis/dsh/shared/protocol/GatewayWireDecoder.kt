@@ -92,15 +92,64 @@ object GatewayWireDecoder {
         val parsed = wireJson.parseToJsonElement(text)
         val objectValue = parsed as? JsonObject
             ?: return wireJson.decodeFromJsonElement(GatewayFrame.serializer(), parsed)
-        var normalized = if (
+        var normalized = when {
             "kind" !in objectValue &&
-            objectValue["sessionId"] is JsonPrimitive &&
-            objectValue["seq"] is JsonPrimitive &&
-            objectValue["event"] is JsonObject
-        ) {
-            JsonObject(objectValue + ("kind" to JsonPrimitive("event")))
-        } else {
-            objectValue
+                objectValue["sessionId"] is JsonPrimitive &&
+                objectValue["seq"] is JsonPrimitive &&
+                objectValue["event"] is JsonObject -> {
+                JsonObject(objectValue + ("kind" to JsonPrimitive("event")))
+            }
+            "kind" !in objectValue && (
+                objectValue["type"]?.let { (it as? JsonPrimitive)?.contentOrNull in setOf("question-requested", "ask_question", "question") } == true ||
+                objectValue["questions"] is JsonArray
+            ) -> {
+                JsonObject(objectValue + ("kind" to JsonPrimitive("question-requested")))
+            }
+            "kind" !in objectValue && objectValue["type"] is JsonPrimitive -> {
+                JsonObject(objectValue + ("kind" to objectValue.getValue("type")))
+            }
+            else -> objectValue
+        }
+        val kindStr = (normalized["kind"] as? JsonPrimitive)?.contentOrNull
+        if (kindStr in setOf("ask_question", "question")) {
+            normalized = JsonObject(normalized + ("kind" to JsonPrimitive("question-requested")))
+        }
+        if (normalized["kind"]?.let { (it as? JsonPrimitive)?.contentOrNull == "question-requested" } == true) {
+            val rpcId = normalized["rpcId"] ?: normalized["rpc_id"] ?: normalized["id"] ?: normalized["callId"]
+            if (rpcId != null && "rpcId" !in normalized) {
+                normalized = JsonObject(normalized + ("rpcId" to rpcId))
+            }
+            if ("replay" !in normalized) {
+                normalized = JsonObject(normalized + ("replay" to JsonPrimitive(false)))
+            }
+        }
+        val questions = normalized["questions"] as? JsonArray
+        if (questions != null) {
+            normalized = JsonObject(normalized + ("questions" to JsonArray(questions.mapIndexed { index, item ->
+                val qObj = item as? JsonObject ?: return@mapIndexed item
+                val id = qObj["id"] ?: JsonPrimitive("q_${index + 1}")
+                val questionText = qObj["question"] ?: qObj["prompt"] ?: qObj["text"] ?: qObj["header"] ?: JsonPrimitive("")
+                val multiSelect = qObj["multiSelect"] ?: qObj["multi_select"] ?: qObj["is_multi_select"]
+                val optionsArray = qObj["options"] as? JsonArray
+                val normalizedOptions = optionsArray?.map { opt ->
+                    when (opt) {
+                        is JsonPrimitive -> JsonObject(mapOf("label" to opt))
+                        is JsonObject -> {
+                            val label = opt["label"] ?: opt["text"] ?: opt["title"] ?: opt["name"] ?: JsonPrimitive("")
+                            JsonObject(opt + ("label" to label))
+                        }
+                        else -> opt
+                    }
+                }
+                var updated = qObj + mapOf("id" to id, "question" to questionText)
+                if (multiSelect != null && "multiSelect" !in updated) {
+                    updated = updated + ("multiSelect" to multiSelect)
+                }
+                if (normalizedOptions != null) {
+                    updated = updated + ("options" to JsonArray(normalizedOptions))
+                }
+                JsonObject(updated)
+            })))
         }
         val presets = normalized["presets"] as? JsonArray
         if (presets != null) {

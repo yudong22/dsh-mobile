@@ -44,6 +44,9 @@ private extension ConversationItem.Kind {
         case "TOOL_RESULT": self = .toolResult
         case "STATUS": self = .status
         case "SYSTEM": self = .system
+        // `QUESTION` 是 Android 时间线内联提问卡片的种类。iOS 本版未实现该组件，
+        // 映射为普通工具行以避免未知 kind 触发永久 fail-closed（见本文件 failClosed）。
+        case "QUESTION": self = .tool
         default: return nil
         }
     }

@@ -2,6 +2,7 @@ package com.clarklevis.dsh.shared
 
 import com.clarklevis.dsh.shared.facade.SharedMobileFacade
 import com.clarklevis.dsh.shared.facade.SharedMobileStore
+import com.clarklevis.dsh.shared.protocol.GatewayQuestionAnswer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -51,6 +52,61 @@ class SharedMobileStoreTest {
         )
         assertEquals(listOf("kept"), snapshot.sessions.map { it.id })
     }
+
+    /**
+     * Android 提问作答必须经 KMP 校验：非法批次（id 顺序错、selected 不在选项内）不得产生 effect。
+     */
+    @Test
+    fun questionAnswerValidationRejectsInvalidBatchAndAcceptsValidOne() {
+        val store = SharedMobileStore()
+        store.acceptFrame(
+            """{"kind":"question-requested","rpcId":"r1","sessionId":"s","questions":[{"id":"q1","question":"选哪个？","options":[{"label":"A"},{"label":"B"}]}]}"""
+        )
+        assertEquals(1, store.snapshot().pendingQuestionCount)
+
+        // id 与请求不一致 → 拒绝，无 effect。
+        val orderMismatch = store.submitQuestionAnswer(
+            "r1",
+            listOf(GatewayQuestionAnswer(id = "q9", selected = listOf("A"))),
+            isConnected = true
+        )
+        assertNull(orderMismatch.effect)
+
+        // selected 不在选项内 → 拒绝，无 effect。
+        val badOption = store.submitQuestionAnswer(
+            "r1",
+            listOf(GatewayQuestionAnswer(id = "q1", selected = listOf("C"))),
+            isConnected = true
+        )
+        assertNull(badOption.effect)
+
+        // 合法批次 → 恰好一个 effect。
+        val accepted = store.submitQuestionAnswer(
+            "r1",
+            listOf(GatewayQuestionAnswer(id = "q1", selected = listOf("A"))),
+            isConnected = true
+        )
+        assertEquals("answer", accepted.effect?.action)
+        assertEquals("r1", accepted.effect?.rpcId)
+    }
+
+    /** effect 至多一次：重复提交不得再次发包。 */
+    @Test
+    fun questionAnswerEffectIsEmittedAtMostOnce() {
+        val store = SharedMobileStore()
+        store.acceptFrame(
+            """{"kind":"question-requested","rpcId":"r1","sessionId":"s","questions":[{"id":"q1","question":"选哪个？","options":[{"label":"A"}]}]}"""
+        )
+        val first = store.submitQuestionAnswer(
+            "r1", listOf(GatewayQuestionAnswer(id = "q1", selected = listOf("A"))), isConnected = true
+        )
+        assertEquals("answer", first.effect?.action)
+        val second = store.submitQuestionAnswer(
+            "r1", listOf(GatewayQuestionAnswer(id = "q1", selected = listOf("A"))), isConnected = true
+        )
+        assertNull(second.effect)
+    }
+
     @Test
     fun facadeNormalizesWireKindForPlatformAdapters() {
         assertEquals(

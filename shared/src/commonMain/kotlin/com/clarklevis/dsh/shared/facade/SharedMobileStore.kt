@@ -2,6 +2,8 @@ package com.clarklevis.dsh.shared.facade
 
 import com.clarklevis.dsh.shared.SharedModuleInfo
 import com.clarklevis.dsh.shared.domain.QuestionAction
+import com.clarklevis.dsh.shared.domain.QuestionRequestStatus
+import com.clarklevis.dsh.shared.domain.QuestionSubmission
 import com.clarklevis.dsh.shared.domain.ApprovalAction
 import com.clarklevis.dsh.shared.domain.ApprovalReducer
 import com.clarklevis.dsh.shared.domain.ApprovalState
@@ -28,6 +30,7 @@ import com.clarklevis.dsh.shared.protocol.GatewayModelGroup
 import com.clarklevis.dsh.shared.protocol.GatewayModelSelection
 import com.clarklevis.dsh.shared.protocol.GatewayPermissionOption
 import com.clarklevis.dsh.shared.protocol.GatewayQuestionAction
+import com.clarklevis.dsh.shared.protocol.GatewayQuestionAnswer
 import com.clarklevis.dsh.shared.protocol.GatewaySessionPermissions
 import com.clarklevis.dsh.shared.protocol.GatewaySessionStatsSnapshot
 import com.clarklevis.dsh.shared.protocol.GatewaySessionSummary
@@ -111,6 +114,21 @@ data class GatewayGoalProjection(
     val goal: GatewayGoalSnapshot?
 )
 
+/** Question 提交结果：新快照 + 至多一个待执行 effect。 */
+data class SharedMobileQuestionSubmission(
+    val snapshot: SharedMobileSnapshot,
+    val effect: SharedMobileQuestionEffect? = null
+)
+
+/** 平台层应且仅应执行一次的 Question I/O 描述。 */
+@Serializable
+data class SharedMobileQuestionEffect(
+    val action: String,
+    val rpcId: String,
+    val sessionId: String,
+    val answers: List<GatewayQuestionAnswer>? = null
+)
+
 data class SharedMobileApprovalSubmission(
     val snapshot: SharedMobileSnapshot,
     val effect: SharedApprovalEffect? = null
@@ -189,6 +207,74 @@ class SharedMobileStore(
             )
         } else null
         return SharedMobileApprovalSubmission(makeSnapshot(), effect)
+    }
+
+    /**
+     * 提交 Human Question 答案。走 KMP 的 [QuestionReducer] 校验（id 顺序、选项合法、
+     * 单选约束、custom 与 selected 互斥），并保证 effect 至多一次。
+     *
+     * 平台侧此前直连 transport 发 `question-answer`，绕过了这些校验；这里补齐，
+     * 使非法批次在本地就被拒绝，而不是换来一次必然失败的往返。
+     */
+    fun submitQuestionAnswer(
+        rpcId: String,
+        answers: List<GatewayQuestionAnswer>,
+        isConnected: Boolean
+    ): SharedMobileQuestionSubmission {
+        val request = questionState.pendingRequests.firstOrNull { it.rpcId == rpcId }
+            ?: return SharedMobileQuestionSubmission(makeSnapshot())
+        // 同一提交在 Submitting/Accepted 期间不再次产生 effect，确保平台 I/O 至多执行一次。
+        when (questionState.requestStatuses[rpcId]) {
+            is QuestionRequestStatus.Submitting,
+            is QuestionRequestStatus.Accepted -> return SharedMobileQuestionSubmission(makeSnapshot())
+            else -> Unit
+        }
+        questionState = QuestionReducer.reduce(
+            questionState,
+            QuestionAction.Submit(request, QuestionSubmission.Answer(answers), isConnected)
+        )
+        val effect = if (questionState.requestStatuses[rpcId] == QuestionRequestStatus.Submitting(GatewayQuestionAction.ANSWER)) {
+            SharedMobileQuestionEffect("answer", rpcId, request.sessionId, answers)
+        } else null
+        return SharedMobileQuestionSubmission(makeSnapshot(), effect)
+    }
+
+    /** 取消（跳过）提问；同样经 KMP 状态机，保证 effect 至多一次。 */
+    fun submitQuestionCancel(rpcId: String, isConnected: Boolean): SharedMobileQuestionSubmission {
+        val request = questionState.pendingRequests.firstOrNull { it.rpcId == rpcId }
+            ?: return SharedMobileQuestionSubmission(makeSnapshot())
+        when (questionState.requestStatuses[rpcId]) {
+            is QuestionRequestStatus.Submitting,
+            is QuestionRequestStatus.Accepted -> return SharedMobileQuestionSubmission(makeSnapshot())
+            else -> Unit
+        }
+        questionState = QuestionReducer.reduce(
+            questionState,
+            QuestionAction.Submit(request, QuestionSubmission.Cancel, isConnected)
+        )
+        val effect = if (questionState.requestStatuses[rpcId] == QuestionRequestStatus.Submitting(GatewayQuestionAction.CANCEL)) {
+            SharedMobileQuestionEffect("cancel", rpcId, request.sessionId, null)
+        } else null
+        return SharedMobileQuestionSubmission(makeSnapshot(), effect)
+    }
+
+    /** 平台回执：`question-response` 帧到达后调用，驱动提交态收敛。 */
+    fun questionResponseReceived(rpcId: String, action: String, accepted: Boolean, reason: String?): SharedMobileSnapshot {
+        val parsed = when (action) {
+            "answer" -> GatewayQuestionAction.ANSWER
+            "cancel" -> GatewayQuestionAction.CANCEL
+            else -> GatewayQuestionAction.ANSWER
+        }
+        questionState = QuestionReducer.reduce(
+            questionState,
+            QuestionAction.ResponseReceived(rpcId, parsed, accepted, reason)
+        )
+        return makeSnapshot()
+    }
+
+    fun questionResolved(rpcId: String): SharedMobileSnapshot {
+        questionState = QuestionReducer.reduce(questionState, QuestionAction.Resolved(rpcId))
+        return makeSnapshot()
     }
 
     fun approvalRequestFailed(rpcId: String, message: String?): SharedMobileSnapshot {

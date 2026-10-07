@@ -1,6 +1,7 @@
 package com.clarklevis.dsh.shared.projection
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -32,12 +33,20 @@ object ToolActivitySummaryFormatter {
             "grep", "search", "ripgrep", "glob", "find" -> "搜索"
             "list", "ls", "list_directory" -> "列出"
             "webfetch", "web_fetch", "fetch" -> "获取"
+            "ask_user_question", "ask_question" -> "提问"
             else -> name.ifBlank { "工具" }
+        }
+        val questions = fields?.get("questions") as? JsonArray
+        val firstQuestion = questions?.firstOrNull()?.let { it as? JsonObject }
+        val questionText = firstQuestion?.let { question ->
+            listOf("question", "prompt", "text", "header")
+                .firstNotNullOfOrNull { key -> (question[key] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
         }
         val detail = (value("description") ?: when (label) {
             "执行" -> command
             "搜索" -> listOfNotNull(query, path).joinToString(" · ")
             "获取" -> value("url")
+            "提问" -> questionText
             else -> path ?: command ?: query ?: value("url")
         }).orEmpty().replace(Regex("\\s+"), " ").trim().take(240)
         val annotation = when {
@@ -45,6 +54,8 @@ object ToolActivitySummaryFormatter {
             label == "修改" && old != null && replacement != null ->
                 "替换 ${lineCount(old)} → ${lineCount(replacement)} 行"
             label == "读取" -> value("limit", "num_lines")?.let { "$it 行" }.orEmpty()
+            label == "提问" && questions != null && questions.size > 1 -> "${questions.size} 个问题"
+            label == "提问" -> ""
             else -> ""
         }
         return ToolActivitySummary(label, detail, annotation)

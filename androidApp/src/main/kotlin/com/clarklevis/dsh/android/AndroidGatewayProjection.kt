@@ -9,6 +9,7 @@ import com.clarklevis.dsh.shared.facade.SharedHistoryEffect
 import com.clarklevis.dsh.shared.facade.SharedHistoryPatch
 import com.clarklevis.dsh.shared.facade.SharedHistoryStore
 import com.clarklevis.dsh.shared.facade.SharedMobileApprovalSubmission
+import com.clarklevis.dsh.shared.facade.SharedMobileQuestionSubmission
 import com.clarklevis.dsh.shared.facade.SharedMobileSnapshot
 import com.clarklevis.dsh.shared.facade.SharedMobileStore
 import com.clarklevis.dsh.shared.facade.SharedMviEvent
@@ -18,6 +19,7 @@ import com.clarklevis.dsh.shared.projection.TrajectoryNode
 import com.clarklevis.dsh.shared.projection.TrajectoryProjection
 import com.clarklevis.dsh.shared.protocol.GatewayFrame
 import com.clarklevis.dsh.shared.protocol.GatewayPendingApprovalRequest
+import com.clarklevis.dsh.shared.protocol.GatewayQuestionAnswer
 import com.clarklevis.dsh.shared.protocol.JsonValue
 import com.clarklevis.dsh.shared.protocol.SessionEvent
 import com.clarklevis.dsh.shared.sync.AssistantChunk
@@ -82,6 +84,25 @@ internal class AndroidGatewayProjection(
     private val conversationEnvelope = MviEnvelopeValidator("conversation")
     private val historySubscription = historyStore.subscribe(::acceptHistoryMviEvent)
     private val conversationSubscription = conversationStore.subscribe(::acceptConversationMviEvent)
+
+    /**
+     * 经 KMP 校验后提交提问答案。校验失败时 effect 为 null，平台因此不会发出必然被拒的请求。
+     */
+    fun submitQuestionAnswer(
+        rpcId: String,
+        answers: List<GatewayQuestionAnswer>,
+        isConnected: Boolean
+    ): SharedMobileQuestionSubmission {
+        val submission = mobileStore.submitQuestionAnswer(rpcId, answers, isConnected)
+        controlSnapshot = submission.snapshot
+        return submission.copy(snapshot = snapshot())
+    }
+
+    fun submitQuestionCancel(rpcId: String, isConnected: Boolean): SharedMobileQuestionSubmission {
+        val submission = mobileStore.submitQuestionCancel(rpcId, isConnected)
+        controlSnapshot = submission.snapshot
+        return submission.copy(snapshot = snapshot())
+    }
 
     /** 导出/恢复会话列表缓存；平台层负责实际磁盘 I/O。 */
     fun exportSessionCache(): String = mobileStore.exportSessionCache()

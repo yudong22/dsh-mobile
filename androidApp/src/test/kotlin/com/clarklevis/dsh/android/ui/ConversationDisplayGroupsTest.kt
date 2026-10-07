@@ -216,6 +216,49 @@ class ConversationDisplayGroupsTest {
         assertEquals("orphan-result", process.tools.single().result?.id)
     }
 
+    /** `ask_user_question` 必须移出默认折叠的「思考过程」，成为独立的可交互行。 */
+    @Test
+    fun askUserQuestionBecomesStandaloneQuestionEntry() {
+        val entries = makeConversationDisplayEntries(
+            listOf(
+                item("user", ConversationItemKind.USER, seconds = 1.0),
+                item("reason", ConversationItemKind.REASONING, text = "先分析", seconds = 2.0),
+                item(
+                    "call",
+                    ConversationItemKind.QUESTION,
+                    title = "ask_user_question",
+                    text = """{"questions":[{"id":"q1","question":"选哪个？"}]}""",
+                    seconds = 3.0
+                ),
+                item("assistant", ConversationItemKind.ASSISTANT, seconds = 4.0)
+            )
+        )
+
+        // reasoning 仍自成一个折叠组；关键是提问不在其中，而是独立成行。
+        assertTrue(entries.single { it is ConversationDisplayEntry.Process }
+            .let { (it as ConversationDisplayEntry.Process).group.items.none { item -> item.id == "call" } })
+        val question = entries.single { it is ConversationDisplayEntry.Question }
+            as ConversationDisplayEntry.Question
+        assertEquals("call", question.call.id)
+        assertNull(question.result)
+        assertEquals(ConversationDisplayContentType.QUESTION, question.contentType)
+    }
+
+    /** 提问之后的 `tool/result` 回填到提问行（展示「已作答」），不进入折叠组。 */
+    @Test
+    fun questionResultAttachesToQuestionInsteadOfProcessGroup() {
+        val entries = makeConversationDisplayEntries(
+            listOf(
+                item("call", ConversationItemKind.QUESTION, title = "ask_user_question", seconds = 1.0),
+                item("result", ConversationItemKind.TOOL_RESULT, text = "已选择 A", seconds = 2.0)
+            )
+        )
+
+        assertEquals(1, entries.size)
+        val question = entries.single() as ConversationDisplayEntry.Question
+        assertEquals("result", question.result?.id)
+    }
+
     private fun item(
         id: String,
         kind: ConversationItemKind,

@@ -1466,15 +1466,28 @@ class AndroidSharedStateHolder(
         }
     }
 
+    /**
+     * 提交提问答案。先经 KMP [SharedMobileStore.submitQuestionAnswer] 校验
+     * （id 顺序、选项合法性、单选约束），非法批次在本地即被拒绝，不再产生必然失败的往返；
+     * 校验通过后仅在 KMP 产出 effect 时发送一次 RPC。
+     */
     fun answerQuestion(rpcId: String, sessionId: String, answers: List<GatewayQuestionAnswer>) {
-        graph?.let { appGraph ->
-            appGraph.gatewayScope.launch { appGraph.gatewayRuntime.answerQuestion(rpcId, sessionId, answers) }
+        val appGraph = graph ?: return
+        appGraph.gatewayScope.launch {
+            val submission = projectionActor.submitQuestionAnswer(rpcId, answers, isConnected = true)
+            withContext(Dispatchers.Main.immediate) { publishSnapshot(submission.snapshot) }
+            val effect = submission.effect ?: return@launch
+            appGraph.gatewayRuntime.answerQuestion(effect.rpcId, effect.sessionId, effect.answers.orEmpty())
         }
     }
 
     fun cancelQuestion(rpcId: String, sessionId: String) {
-        graph?.let { appGraph ->
-            appGraph.gatewayScope.launch { appGraph.gatewayRuntime.cancelQuestion(rpcId, sessionId) }
+        val appGraph = graph ?: return
+        appGraph.gatewayScope.launch {
+            val submission = projectionActor.submitQuestionCancel(rpcId, isConnected = true)
+            withContext(Dispatchers.Main.immediate) { publishSnapshot(submission.snapshot) }
+            val effect = submission.effect ?: return@launch
+            appGraph.gatewayRuntime.cancelQuestion(effect.rpcId, effect.sessionId)
         }
     }
 

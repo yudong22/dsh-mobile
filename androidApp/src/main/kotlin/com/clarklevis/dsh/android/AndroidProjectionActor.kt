@@ -1,9 +1,11 @@
 package com.clarklevis.dsh.android
 
 import com.clarklevis.dsh.shared.facade.SharedApprovalEffect
+import com.clarklevis.dsh.shared.facade.SharedMobileQuestionSubmission
 import com.clarklevis.dsh.shared.facade.SharedMobileSnapshot
 import com.clarklevis.dsh.shared.projection.TrajectoryNode
 import com.clarklevis.dsh.shared.protocol.GatewayFrame
+import com.clarklevis.dsh.shared.protocol.GatewayQuestionAnswer
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -209,6 +211,22 @@ internal class AndroidProjectionActor(
     fun loadFixtureImmediate(afterPublish: () -> Unit = {}) {
         publish(projection.loadFixture(), false)
         afterPublish()
+    }
+
+    /** 经 KMP 校验后提交提问答案；网络 I/O 由持有者负责。 */
+    suspend fun submitQuestionAnswer(
+        rpcId: String,
+        answers: List<GatewayQuestionAnswer>,
+        isConnected: Boolean
+    ): SharedMobileQuestionSubmission = mutationLock.withLock {
+        projection.submitQuestionAnswer(rpcId, answers, isConnected)
+    }
+
+    suspend fun submitQuestionCancel(
+        rpcId: String,
+        isConnected: Boolean
+    ): SharedMobileQuestionSubmission = mutationLock.withLock {
+        projection.submitQuestionCancel(rpcId, isConnected)
     }
 
     /**

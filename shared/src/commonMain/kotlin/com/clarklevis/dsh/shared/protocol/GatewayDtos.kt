@@ -321,7 +321,7 @@ data class GatewayImageAttachment(
 
 @Serializable
 data class GatewayQuestion(
-    val id: String,
+    val id: String = "",
     val header: String? = null,
     val question: String,
     val detail: String? = null,
@@ -340,7 +340,7 @@ data class GatewayPendingQuestionRequest(
     val rpcId: String,
     val sessionId: String,
     val questions: List<GatewayQuestion>,
-    val replay: Boolean
+    val replay: Boolean = false
 ) {
     override fun toString(): String =
         "GatewayPendingQuestionRequest(rpcId=<redacted>, sessionId=$sessionId, " +

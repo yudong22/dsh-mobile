@@ -540,7 +540,7 @@ private fun HeaderIconButton(iconRes: Int, contentDescription: String, onClick: 
 }
 
 @Composable
-private fun QuestionHeading(question: GatewayQuestion) {
+internal fun QuestionHeading(question: GatewayQuestion) {
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
         question.header?.takeIf(String::isNotEmpty)?.let { header ->
             Text(
@@ -577,7 +577,7 @@ private fun QuestionHeading(question: GatewayQuestion) {
 }
 
 @Composable
-private fun AnswerControls(
+internal fun AnswerControls(
     question: GatewayQuestion,
     selections: Set<String>,
     customAnswer: String,
@@ -835,9 +835,9 @@ private fun FooterIconButton(
     }
 }
 
-private data class OptionMetadata(val title: String, val isRecommended: Boolean)
+internal data class OptionMetadata(val title: String, val isRecommended: Boolean)
 
-private fun optionMetadata(label: String): OptionMetadata {
+internal fun optionMetadata(label: String): OptionMetadata {
     val suffixes = listOf(" (recommended)", "（recommended）", " (推荐)", "（推荐）")
     val suffix = suffixes.firstOrNull { label.lowercase().endsWith(it.lowercase()) }
     return OptionMetadata(
@@ -846,7 +846,7 @@ private fun optionMetadata(label: String): OptionMetadata {
     )
 }
 
-private fun answered(
+internal fun answered(
     question: GatewayQuestion,
     selections: Map<String, Set<String>>,
     customAnswers: Map<String, String>

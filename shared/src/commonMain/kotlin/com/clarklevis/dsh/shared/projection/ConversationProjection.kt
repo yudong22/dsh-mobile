@@ -10,7 +10,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class ConversationItemKind { USER, CONTEXT, ASSISTANT, REASONING, TOOL, JSON_TOOL, TOOL_RESULT, STATUS, SYSTEM }
+enum class ConversationItemKind { USER, CONTEXT, ASSISTANT, REASONING, TOOL, JSON_TOOL, TOOL_RESULT, STATUS, SYSTEM, QUESTION }
 
 @Serializable
 data class ConversationProjectionLabels(
@@ -211,7 +211,7 @@ class ConversationProjector(
             event.type == "assistant/chunk" && event.chunkType == "tool-call-delta" && key !in finalizedKeys -> {
                 val toolKey = event.tool?.id ?: key
                 val name = event.tool?.name ?: labels.assemblingTool
-                val kind = if (name.equals("run_code", ignoreCase = true)) ConversationItemKind.JSON_TOOL else ConversationItemKind.TOOL
+                val kind = toolItemKind(name)
                 appendStream("stream-tool-$toolKey", "tool-$toolKey", kind, name, event.tool?.argumentsDelta.orEmpty(), date, operations)
             }
             event.type == "assistant/attempt" -> {
@@ -270,7 +270,7 @@ class ConversationProjector(
             }
             event.type == "tool/call" -> {
                 val name = event.name ?: "Tool Call"
-                val kind = if (name.equals("run_code", ignoreCase = true)) ConversationItemKind.JSON_TOOL else ConversationItemKind.TOOL
+                val kind = toolItemKind(name)
                 insert(ConversationItem(eventId(record), kind, name, event.arguments?.jsonDisplayText().orEmpty(), epochSeconds = date), operations)
             }
             event.type == "tool/result" -> insert(ConversationItem(
@@ -525,6 +525,17 @@ data class ConversationHistoryRebase(
             return ConversationHistoryRebase(merged, ConversationProjector().apply { rebuild(merged) })
         }
     }
+}
+
+/**
+ * `ask_user_question` 需要独立的展示种类，平台据此渲染可交互提问卡片，而不是把
+ * 工具调用降级成只读 JSON 行。`ask_question` 是历史/别名写法，一并识别。
+ */
+private fun toolItemKind(name: String): ConversationItemKind = when {
+    name.equals("run_code", ignoreCase = true) -> ConversationItemKind.JSON_TOOL
+    name.equals("ask_user_question", ignoreCase = true) ||
+        name.equals("ask_question", ignoreCase = true) -> ConversationItemKind.QUESTION
+    else -> ConversationItemKind.TOOL
 }
 
 private fun contextSourceName(event: GatewayEvent): String =

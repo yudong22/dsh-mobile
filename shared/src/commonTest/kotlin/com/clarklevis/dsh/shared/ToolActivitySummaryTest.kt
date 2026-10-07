@@ -44,6 +44,30 @@ class ToolActivitySummaryTest {
         assertEquals("Check workspace", ToolActivitySummaryFormatter.summarize("bash", encoded).detail)
     }
 
+    /** `ask_user_question` 必须有专用文案，否则时间线只会显示一个裸工具名。 */
+    @Test
+    fun askUserQuestionSummaryShowsQuestionTextAndCount() {
+        val summary = ToolActivitySummaryFormatter.summarize(
+            "ask_user_question",
+            """{"questions":[{"id":"q1","question":"选用哪种模式？","options":[{"label":"A"}]},{"id":"q2","question":"是否继续？"}]}"""
+        )
+        assertEquals("提问", summary.label)
+        assertEquals("选用哪种模式？", summary.detail)
+        assertEquals("2 个问题", summary.annotation)
+    }
+
+    /** 别名写出与单题情况也要安全收敛。 */
+    @Test
+    fun askQuestionAliasAndSingleQuestionSummaryAreHandled() {
+        val single = ToolActivitySummaryFormatter.summarize(
+            "ask_question",
+            """{"questions":[{"id":"q1","question":"确认吗？"}]}"""
+        )
+        assertEquals("提问", single.label)
+        assertEquals("确认吗？", single.detail)
+        assertEquals("", single.annotation)
+    }
+
     @Test
     fun invalidOrUnknownToolArgumentsRemainSafe() {
         val summary = ToolActivitySummaryFormatter.summarize("custom_tool", "partial {")

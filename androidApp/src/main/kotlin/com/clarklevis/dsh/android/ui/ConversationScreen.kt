@@ -936,6 +936,26 @@ private fun ConversationTimeline(
                             onPreviewImages = onPreviewImages
                         )
                         is ConversationDisplayEntry.Process -> ConversationProcessRow(display.group)
+                        is ConversationDisplayEntry.Question -> {
+                            // 关联待答请求：优先按题目 id 集合匹配，回落「本 session 最后一个待答提问」。
+                            val pending = stateHolder.snapshot.pendingQuestions.firstOrNull { request ->
+                                request.sessionId == selectedSessionId &&
+                                    matchesQuestionCall(request.questions, display.call.text)
+                            } ?: stateHolder.snapshot.pendingQuestions
+                                .lastOrNull { it.sessionId == selectedSessionId }
+                            AskQuestionToolCard(
+                                request = pending,
+                                callArguments = display.call.text,
+                                result = display.result,
+                                isSubmitting = false,
+                                onAnswer = { answers ->
+                                    pending?.let {
+                                        stateHolder.answerQuestion(it.rpcId, it.sessionId, answers)
+                                    }
+                                },
+                                onCancel = { pending?.let { stateHolder.cancelQuestion(it.rpcId, it.sessionId) } }
+                            )
+                        }
                     }
                     is ConversationTimelineEntry.AssistantHeader -> AssistantMessageHeader(
                         item = entry.item,

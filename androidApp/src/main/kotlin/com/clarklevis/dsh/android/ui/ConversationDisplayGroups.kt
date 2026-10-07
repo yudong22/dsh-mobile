@@ -24,6 +24,19 @@ internal sealed interface ConversationDisplayEntry {
         override val contentType: ConversationDisplayContentType =
             ConversationDisplayContentType.PROCESS
     }
+
+    /**
+     * `ask_user_question` 的独立提问行。它必须常驻可见且可交互，因此不能并入默认折叠的
+     * 「思考过程」组；[result] 是该提问的 `tool/result`（含已作答历史）。
+     */
+    data class Question(
+        val call: ConversationItem,
+        val result: ConversationItem?
+    ) : ConversationDisplayEntry {
+        override val id: String = "question-${call.id}"
+        override val contentType: ConversationDisplayContentType =
+            ConversationDisplayContentType.QUESTION
+    }
 }
 
 internal enum class ConversationDisplayContentType {
@@ -34,7 +47,8 @@ internal enum class ConversationDisplayContentType {
     ASSISTANT_FOOTER,
     PROCESS,
     STATUS,
-    SYSTEM
+    SYSTEM,
+    QUESTION
 }
 
 internal sealed interface ConversationTimelineEntry {
@@ -251,6 +265,8 @@ internal fun makeConversationDisplayEntries(
 ): List<ConversationDisplayEntry> {
     val result = mutableListOf<ConversationDisplayEntry>()
     val processItems = mutableListOf<ConversationItem>()
+    /** 最近一个尚未配到 `tool/result` 的提问行下标；结果按位置紧随其后回填。 */
+    var pendingQuestionIndex = -1
 
     fun flushProcess() {
         val first = processItems.firstOrNull() ?: return
@@ -268,8 +284,26 @@ internal fun makeConversationDisplayEntries(
             ConversationItemKind.CONTEXT,
             ConversationItemKind.REASONING,
             ConversationItemKind.TOOL,
-            ConversationItemKind.JSON_TOOL,
-            ConversationItemKind.TOOL_RESULT -> processItems += item
+            ConversationItemKind.JSON_TOOL -> processItems += item
+
+            // 提问的 tool/result 回填给提问行，不进入折叠组，便于展示「已作答」。
+            ConversationItemKind.TOOL_RESULT -> {
+                val target = pendingQuestionIndex
+                val question = if (target >= 0) result.getOrNull(target) as? ConversationDisplayEntry.Question else null
+                if (question != null && question.result == null) {
+                    result[target] = question.copy(result = item)
+                    pendingQuestionIndex = -1
+                } else {
+                    processItems += item
+                }
+            }
+
+            ConversationItemKind.QUESTION -> {
+                // 提问必须移出折叠的「思考过程」，单独成行常驻可见。
+                flushProcess()
+                pendingQuestionIndex = result.size
+                result += ConversationDisplayEntry.Question(call = item, result = null)
+            }
 
             ConversationItemKind.STATUS -> {
                 flushProcess()
