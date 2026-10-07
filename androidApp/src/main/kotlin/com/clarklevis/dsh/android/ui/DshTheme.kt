@@ -81,6 +81,7 @@ private val DarkColors = darkColorScheme(
 @Composable
 internal fun DshTheme(
     appearance: AppearanceSettings = rememberAppearanceSettings(),
+    notifications: AgentNotificationSettings = rememberAgentNotificationSettings(),
     content: @Composable () -> Unit
 ) {
     val view = LocalView.current
@@ -104,6 +105,7 @@ internal fun DshTheme(
     // 所有页面的深浅色判断使用同一份有效配置，避免只更新 MaterialTheme 而留下浅色背景。
     CompositionLocalProvider(
         LocalAppearanceSettings provides appearance,
+        LocalAgentNotificationSettings provides notifications,
         LocalConfiguration provides configuration
     ) {
         MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) {

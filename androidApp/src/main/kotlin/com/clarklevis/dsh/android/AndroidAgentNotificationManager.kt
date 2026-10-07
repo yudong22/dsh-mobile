@@ -1,6 +1,7 @@
 package com.clarklevis.dsh.android
 
 import android.Manifest
+import com.clarklevis.dsh.android.ui.AgentNotificationSettings
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -24,6 +25,9 @@ internal class AndroidAgentNotificationManager(context: Context) {
     private val appContext = context.applicationContext
     private val manager = NotificationManagerCompat.from(appContext)
     private val preferences = appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val notificationPrefs = appContext.getSharedPreferences(
+        AgentNotificationSettings.PREFERENCES_NAME, Context.MODE_PRIVATE
+    )
     private val recentIdentifiers = mutableListOf<String>()
     private val recentIdentifierSet = mutableSetOf<String>()
 
@@ -94,6 +98,27 @@ internal class AndroidAgentNotificationManager(context: Context) {
         )
     }
 
+    fun notifyQuestionAsked(
+        gatewayId: String,
+        rpcId: String,
+        sessionId: String,
+        sessionTitle: String,
+        questionText: String
+    ) {
+        notifyOnce(
+            identifier = "question:$gatewayId:$rpcId",
+            gatewayId = gatewayId,
+            sessionId = sessionId,
+            title = appContext.getString(R.string.agent_question_notification_title),
+            body = appContext.getString(
+                R.string.agent_question_notification_body,
+                sessionTitle,
+                questionText
+            ),
+            icon = R.drawable.ic_question_badge
+        )
+    }
+
     @Synchronized
     private fun notifyOnce(
         identifier: String,
@@ -103,6 +128,7 @@ internal class AndroidAgentNotificationManager(context: Context) {
         body: String,
         icon: Int
     ) {
+        if (!notificationPrefs.getBoolean(AgentNotificationSettings.KEY_NOTIFY_IN_BACKGROUND, true)) return
         if (identifier in recentIdentifierSet) return
         if ((appContext as? DshAndroidApplication)?.isInForeground == true) {
             rememberIdentifier(identifier)

@@ -77,7 +77,9 @@ class AndroidSharedStateHolder(
             graph?.let { appGraph ->
                 appGraph.gatewayScope.launch { appGraph.gatewayRuntime.subscribe(sessionId) }
             }
-        }) { sessionId, beforeSequence, historyFormatVersion ->
+        },
+        onConversationBaselineChanged = ::persistConversationCacheIfAvailable
+    ) { sessionId, beforeSequence, historyFormatVersion ->
             graph?.let { appGraph ->
                 appGraph.gatewayScope.launch {
                     appGraph.gatewayRuntime.requestHistory(
@@ -97,6 +99,9 @@ class AndroidSharedStateHolder(
     )
     private var pendingStreamingSnapshot: SharedMobileSnapshot? = null
     private var streamingSnapshotPublishJob: Job? = null
+    /** 冷启动只从缓存播种一次；避免宿主 sessions 帧到达后被旧缓存覆盖。 */
+    private var sessionCacheRestored = false
+    private var lastPersistedSessionCache: String? = null
     private val attachmentQueue = ArrayDeque<AttachmentRequest>()
     private var activeAttachment: AttachmentRequest? = null
     private var visibleAttachmentKeys: Set<String> = emptySet()
@@ -276,6 +281,14 @@ class AndroidSharedStateHolder(
                             endpoint = value.endpoint
                             selectedWorkspaceId = value.selectedWorkspaceId
                             workspacePreferenceLoaded = true
+                            // 冷启动首次读到偏好时，用本地缓存播种会话列表，
+                            // 使连接建立前就能看到上次的会话；连接后由宿主 sessions 帧覆盖。
+                            if (!sessionCacheRestored) {
+                                sessionCacheRestored = true
+                                if (snapshot.sessions.isEmpty()) {
+                                    applyRestoredSessionCache(value.sessionsJson)
+                                }
+                            }
                             if (hasReceivedWorkspaces) reconcileWorkspaceSelection()
                         }
                     }
@@ -751,6 +764,9 @@ class AndroidSharedStateHolder(
             projectionActor.selectSessionImmediate(sessionId, afterPublish)
         } else {
             appGraph.gatewayScope.launch {
+                // 先用本地缓存呈现对话内容（非网络基线），使连接建立前也能阅读；
+                // 随后无论是否已连接都继续走订阅/历史请求，由宿主数据覆盖。
+                restoreConversationFromCacheIfAvailable(sessionId)
                 projectionActor.selectSession(sessionId, afterPublish)
                 if (trajectoryIsActive) publishTrajectory()
                 if (gatewayState.connection == GatewayConnectionState.CONNECTED) {
@@ -765,6 +781,43 @@ class AndroidSharedStateHolder(
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * 用缓存播种该会话的对话内容。只在内存里还没有该会话事件时执行，避免覆盖
+     * 本次进程已收到的更新内容。
+     */
+    private suspend fun restoreConversationFromCacheIfAvailable(sessionId: String) {
+        val appGraph = graph ?: return
+        if (snapshot.selectedSessionId == sessionId && snapshot.conversation.isNotEmpty()) return
+        val payload = runCatching { appGraph.conversationCache.read(sessionId) }.getOrNull() ?: return
+        // actor 内部经 uiDispatcher 发布 snapshot，这里不再重复写 Compose state。
+        runCatching { projectionActor.restoreConversationCache(sessionId, payload) }
+            .onFailure { platformError = it.message ?: "本地会话缓存读取失败" }
+    }
+
+    /**
+     * 历史基线提交后落盘。只在终态/基线时写，**绝不每 token 写盘**（否则会把流式优化
+     * 省下的成本还回去）。
+     */
+    private fun persistConversationCacheIfAvailable(sessionId: String?) {
+        val appGraph = graph ?: return
+        val id = sessionId ?: return
+        appGraph.gatewayScope.launch {
+            val payload = runCatching { projectionActor.exportConversationCache(id) }.getOrNull() ?: return@launch
+            runCatching { appGraph.conversationCache.write(id, payload) }
+        }
+    }
+
+    /** 会话列表缓存写盘；与投影状态串行后再落盘。 */
+    private fun persistSessionCache() {
+        val appGraph = graph ?: return
+        appGraph.gatewayScope.launch {
+            val encoded = runCatching { projectionActor.exportSessionCache() }.getOrNull() ?: return@launch
+            if (encoded == lastPersistedSessionCache) return@launch
+            lastPersistedSessionCache = encoded
+            runCatching { appGraph.preferences.update(appGraph.preferences.load().copy(sessionsJson = encoded)) }
         }
     }
 
@@ -1807,6 +1860,7 @@ class AndroidSharedStateHolder(
 
     private fun notifyUserForAgentFrame(appGraph: AndroidAppGraph, frame: GatewayFrame) {
         if (frame.kind != "approval-requested" &&
+            frame.kind != "question-requested" &&
             (frame.kind != "event" || frame.event?.type != "turn/end")
         ) return
         val sessionId = frame.sessionId?.takeIf(String::isNotBlank) ?: return
@@ -1823,6 +1877,17 @@ class AndroidSharedStateHolder(
                     sessionId = sessionId,
                     sessionTitle = sessionTitle,
                     detail = request.localizedReason(Locale.getDefault().toLanguageTag()) ?: request.toolName
+                )
+            }
+            frame.kind == "question-requested" -> {
+                val rpcId = frame.rpcId?.takeIf(String::isNotBlank) ?: return
+                val question = frame.questions?.firstOrNull() ?: return
+                appGraph.agentNotifications.notifyQuestionAsked(
+                    gatewayId = appGraph.gatewayLocalId,
+                    rpcId = rpcId,
+                    sessionId = sessionId,
+                    sessionTitle = sessionTitle,
+                    questionText = question.question
                 )
             }
             frame.kind == "event" && frame.event?.type == "turn/end" -> {
@@ -1974,6 +2039,22 @@ class AndroidSharedStateHolder(
             .filter { it.isRunning }
             .mapTo(mutableSetOf()) { it.id }
         cancellingSessionIds = cancellingSessionIds.intersect(runningSessionIds)
+        // 会话列表是低频快照，落盘在 gateway scope 串行执行；正文与 token 数据不经此路径。
+        persistSessionCache()
+    }
+
+    /**
+     * 冷启动从平台缓存播种会话列表；只填列表与选中态，不产生任何网络 effect。
+     * 在 gateway scope 上执行，避免与并发投影争用投影锁。
+     */
+    private fun applyRestoredSessionCache(sessionsJson: String?) {
+        val appGraph = graph ?: return
+        if (sessionsJson.isNullOrBlank()) return
+        appGraph.gatewayScope.launch {
+            val restored = runCatching { projectionActor.restoreSessionCache(sessionsJson) }.getOrNull()
+                ?: return@launch
+            withContext(Dispatchers.Main.immediate) { publishSnapshot(restored) }
+        }
     }
 
     private fun handleWorkspaceFrame(frame: GatewayFrame) {

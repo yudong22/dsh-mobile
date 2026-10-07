@@ -32,12 +32,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.TopAppBarDefaults
 import com.clarklevis.dsh.shared.protocol.GatewayPermissionOption
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -173,6 +176,12 @@ internal fun SettingsScreen(
                         InterfaceStyleSettingsRow()
                         SettingsDivider()
                         LanguageSettingsRow()
+                    }
+                    SettingsSection(
+                        title = stringResource(R.string.settings_notifications_section),
+                        footer = stringResource(R.string.settings_notify_in_background_summary)
+                    ) {
+                        NotificationSettingsRow()
                     }
                     stateHolder.platformError?.let { error ->
                         Text(error, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
@@ -691,6 +700,32 @@ internal fun InterfaceStyleSettingsRow() {
                 appearance.selectInterfaceStyle(InterfaceStyle.valueOf(key))
                 expanded = false
             }
+        )
+    }
+}
+
+@Composable
+internal fun NotificationSettingsRow() {
+    val notifications = LocalAgentNotificationSettings.current
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 54.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            stringResource(R.string.settings_notify_in_background),
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 16.sp
+        )
+        Spacer(Modifier.weight(1f).padding(horizontal = 6.dp))
+        Switch(
+            checked = notifications.notifyInBackground,
+            onCheckedChange = { notifications.updateNotifyInBackground(it) },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                uncheckedThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                uncheckedTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+            )
         )
     }
 }

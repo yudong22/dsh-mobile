@@ -15,4 +15,9 @@
     <string name="agent_execution_completed_notification_body">%1$s：Agent 已完成本次任务</string>
     <string name="agent_execution_failed_notification_title">执行失败</string>
     <string name="agent_execution_failed_notification_body">%1$s：打开 App 查看执行结果</string>
+    <string name="agent_question_notification_title">需要你的回答</string>
+    <string name="agent_question_notification_body">%1$s：Agent 向你提问\n%2$s</string>
+    <string name="settings_notifications_section">通知</string>
+    <string name="settings_notify_in_background">后台时通知我</string>
+    <string name="settings_notify_in_background_summary">App 退到后台后，Agent 提问、需要审批或执行结束时收到通知</string>
 </resources>
