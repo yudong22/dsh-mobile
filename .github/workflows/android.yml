@@ -33,16 +33,16 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses > /dev/null || true
-
-      # AGP resolves the exact platform/build-tools it needs from the installed SDK;
-      # this step only pre-seeds them so the first Gradle run does not have to download.
-      - name: Pre-install SDK platform and build tools
-        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+      # The ubuntu-latest image already ships a complete Android SDK
+      # (ANDROID_HOME=/usr/local/lib/android/sdk) including platform android-36 and
+      # build-tools 36.0.0, which is exactly what this project needs. We deliberately
+      # do NOT call android-actions/setup-android here: it rewrites the SDK layout of
+      # an already-populated directory and fails.
+      - name: Verify Android SDK
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:?not set on this runner}"
+          ls "${ANDROID_HOME}/platforms/android-36" > /dev/null
+          ls "${ANDROID_HOME}/build-tools/36.0.0" > /dev/null
 
       # `:shared:testAndroidHostTest` runs the whole commonTest suite on the JVM
       # (enabled by `withHostTest {}` in shared/build.gradle.kts). The iOS targets
