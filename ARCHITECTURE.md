@@ -74,7 +74,7 @@ KMP 不直接执行网络、磁盘、Keychain、UIKit 或 Android framework I/O�
 
 SwiftUI View 仅读取 `AppStore` 状态并调用语义化 Intent 方法。Conversation 和 Trajectory 的高频更新经 display-link/FIFO 批处理，不对每个 token 复制完整列表。
 
-`androidApp` 使用 Compose 验证 KMP Store 和增量协议。真实 OkHttp WebSocket、DataStore/Keystore、附件和生命周期平台实现属于阶段 12。
+`androidApp` 是 Android 原生产品客户端：Compose UI 只读取状态并调用语义化 Intent；OkHttp WebSocket、DataStore/Keystore、附件缓存、前台服务与生命周期平台实现均已完成（阶段 12/13）。
 
 ## 5. 关键 Use Case
 
@@ -122,4 +122,5 @@ Question request 进入 `SharedQuestionStore`，UI answer/cancel 作为 Intent �
 
 - iOS WebSocket 仍在 Swift；这是有意保留的平台 transport，不是 Swift 业务逻辑回退。
 - Swift UI 镜像为了 SwiftUI/UIKit 观察必须存在，但只能由 KMP Event 发布路径写入。
-- Android 真实 transport、安全持久化和完整产品 UI 尚未完成，分别属于阶段 12 和 13。
+- Android 真实 transport、安全持久化和完整产品 UI 已完成（阶段 12/13）。
+- 两端会话列表已落盘（iOS `gateway.sessions`、Android DataStore `sessions_json`）；会话正文由平台侧 `GatewayConversationCache` 缓存，连接建立前先呈现本地内容。
