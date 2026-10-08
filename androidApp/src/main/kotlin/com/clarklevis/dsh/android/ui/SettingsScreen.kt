@@ -74,7 +74,7 @@ internal fun SettingsScreen(
     var pendingPermission by remember { mutableStateOf<String?>(null) }
     val palette = dshPalette()
     val pageBackground = palette.canvas
-    LaunchedEffect(stateHolder.gatewayState.connection) { stateHolder.refreshProductState() }
+    LaunchedEffect(stateHolder.gatewayState.connection) { stateHolder.refreshProductState(force = true) }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -109,7 +109,7 @@ internal fun SettingsScreen(
                         SettingsValueRow(
                             title = "Agent 预设",
                             value = selectedPreset(stateHolder),
-                            enabled = isConnected(stateHolder),
+                            enabled = online(stateHolder),
                             isLoading = stateHolder.defaultConfigurationLoadingKinds.any {
                                 it == "defaults" || it == "agent-presets"
                             }
@@ -120,7 +120,7 @@ internal fun SettingsScreen(
                         SettingsValueRow(
                             title = "默认模型",
                             value = selectedModel(stateHolder),
-                            enabled = isConnected(stateHolder),
+                            enabled = online(stateHolder),
                             isLoading = stateHolder.defaultConfigurationLoadingKinds.any {
                                 it == "default-model" || it == "save-default-model"
                             }
@@ -129,13 +129,13 @@ internal fun SettingsScreen(
                         }
                         SettingsDivider()
                         PermissionSettingsRow(
-                            value = stateHolder.snapshot.permissionDefaultOptions
-                                .firstOrNull { it.value == stateHolder.snapshot.permissionDefault }?.name
-                                ?: permissionName(stateHolder.snapshot.permissionDefault),
-                            selectedPermission = stateHolder.snapshot.permissionDefault,
-                            options = stateHolder.snapshot.permissionDefaultOptions,
+                            value = stateHolder.permissionDefaultOptions
+                                .firstOrNull { it.value == stateHolder.permissionDefault }?.name
+                                ?: permissionName(stateHolder.permissionDefault),
+                            selectedPermission = stateHolder.permissionDefault,
+                            options = stateHolder.permissionDefaultOptions,
                             expanded = showPermissionPicker,
-                            enabled = isConnected(stateHolder) &&
+                            enabled = online(stateHolder) &&
                                 "set-default" !in stateHolder.defaultConfigurationLoadingKinds,
                             onExpandedChange = { showPermissionPicker = it },
                             onPermissionSelected = { pendingPermission = it }
@@ -146,13 +146,27 @@ internal fun SettingsScreen(
                         SettingsDivider()
                         GatewayStatusRow(stateHolder)
                         SettingsDivider()
-                        SettingsActionRow(if (isConnected(stateHolder)) "断开连接" else "连接") {
-                            if (isConnected(stateHolder)) stateHolder.disconnect() else stateHolder.connect()
+                        // 过渡态必须禁用：IN_PROGRESS 的语义就是「不应让用户重复触发连接操作」
+                        // （DshConnectionStateUi.kt:17-18），否则会与正在进行的握手竞争。
+                        SettingsActionRow(
+                            title = when (stateHolder.gatewayState.connection.dshPhase) {
+                                DshConnectionPhase.ONLINE -> "断开连接"
+                                DshConnectionPhase.IN_PROGRESS -> "连接中…"
+                                DshConnectionPhase.ATTENTION -> "重新连接"
+                                DshConnectionPhase.IDLE -> "连接"
+                            },
+                            enabled = !stateHolder.gatewayState.connection.dshIsTransitioning
+                        ) {
+                            if (stateHolder.gatewayState.connection.dshPhase == DshConnectionPhase.ONLINE) {
+                                stateHolder.disconnect()
+                            } else {
+                                stateHolder.connect()
+                            }
                         }
                         SettingsDivider()
-                        SettingsActionRow("Ping 网关", enabled = isConnected(stateHolder), onClick = stateHolder::pingGateway)
+                        SettingsActionRow("Ping 网关", enabled = online(stateHolder), onClick = stateHolder::pingGateway)
                     }
-                    stateHolder.snapshot.hostSnapshot?.let { host ->
+                    stateHolder.hostSnapshot?.let { host ->
                         SettingsSection("DSH Host") {
                             SettingsValueRow("版本", host.version ?: "—")
                             SettingsDivider()
@@ -192,7 +206,7 @@ internal fun SettingsScreen(
     pendingPermission?.let { value ->
         DshAlertDialog(
             title = "修改全局默认权限？",
-            message = "将新会话的默认权限改为“${stateHolder.snapshot.permissionDefaultOptions.firstOrNull { it.value == value }?.name ?: permissionName(value)}”。这会更新部署级设置，并同步影响 WebUI。",
+            message = "将新会话的默认权限改为“${stateHolder.permissionDefaultOptions.firstOrNull { it.value == value }?.name ?: permissionName(value)}”。这会更新部署级设置，并同步影响 WebUI。",
             confirmLabel = "确认修改",
             onDismissRequest = { pendingPermission = null },
             onConfirm = {
@@ -210,7 +224,7 @@ internal fun AgentPresetSelectionScreen(
     onBack: () -> Unit
 ) {
     var pendingPreset by remember { mutableStateOf<GatewayAgentPreset?>(null) }
-    val presets = stateHolder.snapshot.agentPresets
+    val presets = stateHolder.agentPresets
     val isLoading = "agent-presets" in stateHolder.defaultConfigurationLoadingKinds && presets.isEmpty()
     val isBusy = "set-default" in stateHolder.defaultConfigurationLoadingKinds
     LaunchedEffect(Unit) {
@@ -240,7 +254,7 @@ internal fun AgentPresetSelectionScreen(
                 else -> items(presets, key = GatewayAgentPreset::id) { preset ->
                     AgentPresetCard(
                         preset = preset,
-                        selected = preset.id == stateHolder.snapshot.agentPresetDefault,
+                        selected = preset.id == stateHolder.agentPresetDefault,
                         busy = isBusy,
                         onClick = { pendingPreset = preset }
                     )
@@ -281,7 +295,7 @@ internal fun DefaultModelSelectionScreen(
     onBack: () -> Unit
 ) {
     var pendingChange by remember { mutableStateOf<PendingDefaultModelChange?>(null) }
-    val groups = stateHolder.snapshot.modelCatalog?.groups.orEmpty()
+    val groups = stateHolder.modelCatalog?.groups.orEmpty()
     val isLoading = "models" in stateHolder.defaultConfigurationLoadingKinds && groups.isEmpty()
     val isBusy = "save-default-model" in stateHolder.defaultConfigurationLoadingKinds
     LaunchedEffect(Unit) { stateHolder.ensureDefaultModelConfiguration() }
@@ -316,19 +330,19 @@ internal fun DefaultModelSelectionScreen(
                                 color = dshPalette().textSecondary
                             )
                             group.models.forEach { model ->
-                                val selected = stateHolder.snapshot.defaultModel?.let {
+                                val selected = stateHolder.defaultModel?.let {
                                     it.provider == group.id && it.model == model.id
                                 } == true
                                 DefaultModelCard(
                                     model = model,
                                     selected = selected,
-                                    currentEffort = stateHolder.snapshot.defaultModel?.reasoningEffort,
+                                    currentEffort = stateHolder.defaultModel?.reasoningEffort,
                                     busy = isBusy,
                                     onSelectModel = {
                                         pendingChange = pendingDefaultModelChange(
                                             group = group,
                                             model = model,
-                                            currentEffort = stateHolder.snapshot.defaultModel?.reasoningEffort
+                                            currentEffort = stateHolder.defaultModel?.reasoningEffort
                                         )
                                     },
                                     onSelectEffort = { effort ->
@@ -857,17 +871,25 @@ private fun SettingsActionRow(title: String, enabled: Boolean = true, onClick: (
     }
 }
 
-private fun isConnected(holder: AndroidSharedStateHolder) = holder.gatewayState.connection == GatewayConnectionState.CONNECTED
+
+/**
+ * 是否允许发起**需要网关**的动作。
+ *
+ * 用 [dshBlocksNetworkActions] 而不是 `== CONNECTED`：前者是唯一语义源规定的判据
+ * （`DshConnectionStateUi.kt:53-56`），且不会把 SUSPENDED 等相位误判成「未连接」。
+ */
+private fun online(holder: AndroidSharedStateHolder) =
+    !holder.gatewayState.connection.dshBlocksNetworkActions
 
 private fun selectedPreset(holder: AndroidSharedStateHolder): String {
-    val id = holder.snapshot.agentPresetDefault ?: return "未读取"
-    val gatewayName = holder.snapshot.agentPresets.firstOrNull { it.id == id }?.name
+    val id = holder.agentPresetDefault ?: return "未读取"
+    val gatewayName = holder.agentPresets.firstOrNull { it.id == id }?.name
     return agentPresetDisplayName(id, gatewayName)
 }
 
 private fun selectedModel(holder: AndroidSharedStateHolder): String {
-    val selection = holder.snapshot.defaultModel ?: return "未读取"
-    val item = holder.snapshot.modelCatalog?.groups?.flatMap { it.models }?.firstOrNull { it.id == selection.model }
+    val selection = holder.defaultModel ?: return "未读取"
+    val item = holder.modelCatalog?.groups?.flatMap { it.models }?.firstOrNull { it.id == selection.model }
     val base = item?.name ?: when (selection.model) {
         "deepseek-chat" -> "DeepSeek Chat"
         "deepseek-reasoner" -> "DeepSeek Reasoner"
@@ -885,21 +907,21 @@ private fun selectedModel(holder: AndroidSharedStateHolder): String {
     return effortName?.let { "$base · $it" } ?: base
 }
 
+/**
+ * 连接状态文案**必须**复用 [dshConnectionDetailText]，不要在这里再写一遍 when。
+ *
+ * `DshConnectionStateUi.kt:10-11` 明确要求集中映射：此前本页私有了一份，
+ * 结果 SUSPENDED 在三个地方分别叫「已挂起 / 已暂停 / 未连接」，CONNECTING 叫
+ * 「连接中」而别处是「正在连接…」。
+ */
+private fun connectionLabel(holder: AndroidSharedStateHolder): String =
+    dshConnectionDetailText(holder.gatewayState.connection) ?: "已连接"
+
 /** 权限文案统一走 [runtimePermissionTitle]，避免同一取值在不同页面显示成不同字符串。 */
 private fun permissionName(value: String?) = runtimePermissionTitle(value)
 
-private fun connectionLabel(holder: AndroidSharedStateHolder) = when (holder.gatewayState.connection) {
-    GatewayConnectionState.CONNECTED -> "已连接"
-    GatewayConnectionState.CONNECTING, GatewayConnectionState.AUTHENTICATING -> "连接中"
-    GatewayConnectionState.WAITING_FOR_NETWORK -> "等待网络"
-    GatewayConnectionState.FAILED -> "连接失败"
-    GatewayConnectionState.SUSPENDED -> "已挂起"
-    GatewayConnectionState.DISCONNECTED -> "未连接"
-}
 
+/** 连接点颜色同样复用唯一语义源，避免把过渡态画成灰色、把等待网络画成非 attention 色。 */
 @Composable
-private fun statusColor(holder: AndroidSharedStateHolder) = when (holder.gatewayState.connection) {
-    GatewayConnectionState.CONNECTED -> DshColors.Success
-    GatewayConnectionState.FAILED -> DshColors.Danger
-    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
-}
+private fun statusColor(holder: AndroidSharedStateHolder): androidx.compose.ui.graphics.Color =
+    dshConnectionDotColor(holder.gatewayState.connection, dshPalette())

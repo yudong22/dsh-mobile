@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -26,9 +25,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,7 +65,6 @@ import com.clarklevis.dsh.android.DshAndroidApplication
 import com.clarklevis.dsh.android.R
 import com.clarklevis.dsh.shared.domain.SessionSummary
 import com.clarklevis.dsh.shared.gateway.GatewayConnectionState
-import com.clarklevis.dsh.shared.gateway.GatewayRuntimeState
 import com.clarklevis.dsh.shared.protocol.GatewayWorkspace
 import java.util.Calendar
 import java.util.TimeZone
@@ -136,6 +132,13 @@ internal fun DshProductApp(
             selectedWorkspaceId = stateHolder.selectedWorkspaceId
         )
     }
+    // 抽屉「活跃」区块：近 24 小时有活动的任务，**跨全部项目**（不限当前项目），
+    // 按最近活动倒序。`drawerActiveSessions` 只做 24h 窗口筛选与排序，输入用未做项目过滤的
+    // homeSessions，这样活跃区能露出其它项目的任务；点它走 onOpenSession 直接切进对话页，
+    // 跨项目切换由既有的 selectSession 路径负责，不在这里再引入项目过滤源。
+    val drawerActiveSessions = remember(homeSessions) {
+        drawerActiveSessions(homeSessions)
+    }
     val context = LocalContext.current
     val appVersionLabel = remember(context) {
         runCatching {
@@ -197,6 +200,7 @@ internal fun DshProductApp(
 
     WorkspaceDrawer(
         sessions = sessions,
+        drawerActiveSessions = drawerActiveSessions,
         gatewayLabel = stateHolder.activeGatewayDisplayName(),
         connection = stateHolder.gatewayState.connection,
         deviceIsServer = hosts?.activeProfile?.server == true,
@@ -513,11 +517,18 @@ internal fun DshPageHeader(
 }
 
 /**
- * 首页正文：当前项目卡 + 新建任务 + 最近活跃任务。
+ * 首页正文：品牌头 + 新建任务 + 最近活跃任务列表（撑满剩余高度）。
  *
  * 抽屉与底栏已上移到 [DshProductApp] 的应用外壳（v1.9.0 点 5/6），
  * 本函数只负责「滑动页面」内的内容。`sessions` 由外壳统一投影后传入，
  * 保证首页与抽屉永远来自同一份 `workspaceScopedSessions` 结果。
+ *
+ * 「当前项目」卡已移除：目录名与连接点在品牌头副标题里已有，卡片本身不可点，
+ * 占掉的 66dp 只是把首屏真正要看的内容（会话列表）往下推。切换/新增项目走底栏「项目」Tab。
+ *
+ * 会话列表**不截断**并独占剩余高度：列表自身是 LazyColumn，条数超出一屏时在卡片内滚动，
+ * 品牌头与「新建任务」保持钉住。此前截断到 6 条，会让「最近活跃」覆盖不到稍早的任务，
+ * 而这正是用户最常点进来的入口。
  */
 @Composable
 private fun WorkspaceScreen(
@@ -529,75 +540,53 @@ private fun WorkspaceScreen(
     onNewSession: () -> Unit
 ) {
     var showRuntimeSettings by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(stateHolder.gatewayState.connection) { stateHolder.refreshProductState() }
+    // 连接相位变化是重连边沿，此时缓存已陈旧，必须强制刷新（不能被 TTL 合并挡掉）。
+    LaunchedEffect(stateHolder.gatewayState.connection) { stateHolder.refreshProductState(force = true) }
 
-    val workspaces = stateHolder.availableWorkspaces
     val selectedWorkspace = stateHolder.activeWorkspace
     val ungroupedSelected = stateHolder.isUngroupedWorkspaceSelected
-    // 经派生状态读取，而不是直接读 stateHolder.snapshot：后者是单个 mutableStateOf，
-    // 任何字段变化（例如只改 conversation 的流式发布）都会让整个首页失效重组。
-    val homeSessions = stateHolder.homeSessions
-    // O(会话 × 工作区) 的统计放在 remember 里：直接写在 item 体内会随每次重组重跑。
-    val ungroupedSessionCount = remember(homeSessions, workspaces) {
-        homeSessions.count { session ->
-            session.isVisibleInHistory && workspaces.none { session.id in it.sessionIds }
-        }
-    }
     // 未连接时新建会失败（prepareNewSession 会拒绝），因此这里与抽屉一致地置灰，
     // 避免用户点了才看到报错。
     val canStartNewSession = !stateHolder.gatewayState.connection.dshBlocksNetworkActions
 
-    LazyColumn(
+    // 列表用 weight(1f) 吃掉品牌头/按钮之后的剩余高度：内容不足一屏时底栏上方
+    // 不会留一块空白，超出时在列表内部滚动。
+    Column(
         modifier = Modifier.fillMaxSize()
             .statusBarsPadding()
-            .testTag("workspace-screen"),
-        contentPadding = PaddingValues(horizontal = 18.dp),
-        userScrollEnabled = canScrollVertically
+            .padding(horizontal = 18.dp)
+            .testTag("workspace-screen")
     ) {
-        item {
-            Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                DshBrandHeader(
-                    title = "DeepSeek Harness",
-                    subtitle = runtimeHeaderSubtitle(
-                        deviceLabel = stateHolder.activeGatewayDisplayName(),
-                        workspaceLabel = selectedWorkspace?.title
-                            ?: if (ungroupedSelected) "未分组" else null
-                    ),
-                    connection = stateHolder.gatewayState.connection,
-                    onOpenDrawer = openDrawer,
-                    onOpenRuntimeSettings = { showRuntimeSettings = true }
-                )
-                Spacer(Modifier.height(20.dp))
-                // 当前项目目录：纯指示，不再挂下拉。切换/新增项目统一走底栏「项目」Tab
-                // （ProjectsTabScreen 已有目录浏览器入口），避免首页与底栏两处重复入口。
-                WorkspaceCard(
-                    workspace = selectedWorkspace,
-                    ungrouped = ungroupedSelected,
-                    ungroupedCount = ungroupedSessionCount,
-                    state = stateHolder.gatewayState
-                )
-                Spacer(Modifier.height(14.dp))
-                DshNewTaskButton(
-                    // 与抽屉里的同名按钮保持一致（此前首页叫「新建会话」、抽屉叫
-                    // 「新建任务」，同一个动作两个叫法）。
-                    label = "新建任务",
-                    onClick = onNewSession,
-                    enabled = canStartNewSession
-                )
-                Spacer(Modifier.height(22.dp))
-                // 首页正文：当前项目目录下的最近活跃会话。本区块自行截断，
-                // 完整列表仍在抽屉「任务」区块里（两者共用同一份 `sessions`）。
-                HomeRecentSessions(
-                    allSessions = sessions,
-                    connection = stateHolder.gatewayState.connection,
-                    onOpenSession = onOpenSession,
-                    onRenameSession = stateHolder::renameSession,
-                    onArchiveSession = stateHolder::archiveSession,
-                    onShowAll = openDrawer
-                )
-            }
-        }
-        item { Spacer(Modifier.height(24.dp)) }
+        Spacer(Modifier.height(12.dp))
+        DshBrandHeader(
+            title = "DeepSeek Harness",
+            subtitle = runtimeHeaderSubtitle(
+                deviceLabel = stateHolder.activeGatewayDisplayName(),
+                workspaceLabel = selectedWorkspace?.title
+                    ?: if (ungroupedSelected) "未分组" else null
+            ),
+            connection = stateHolder.gatewayState.connection,
+            onOpenDrawer = openDrawer,
+            onOpenRuntimeSettings = { showRuntimeSettings = true }
+        )
+        Spacer(Modifier.height(20.dp))
+        DshNewTaskButton(
+            // 与抽屉里的同名按钮保持一致（此前首页叫「新建会话」、抽屉叫
+            // 「新建任务」，同一个动作两个叫法）。
+            label = "新建任务",
+            onClick = onNewSession,
+            enabled = canStartNewSession
+        )
+        Spacer(Modifier.height(22.dp))
+        HomeRecentSessions(
+            allSessions = sessions,
+            connection = stateHolder.gatewayState.connection,
+            onOpenSession = onOpenSession,
+            onRenameSession = stateHolder::renameSession,
+            onArchiveSession = stateHolder::archiveSession,
+            modifier = Modifier.weight(1f),
+            canScrollVertically = canScrollVertically
+        )
     }
 
     if (showRuntimeSettings) {
@@ -616,14 +605,18 @@ internal fun DshTonalCircleButton(
     iconRes: Int,
     description: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
     val palette = dshPalette()
+    // 与「新建任务」按钮一致的禁用表达：降低图标与底色的对比度，明确表示此刻点不了
+    // （ProjectTab 用它表达「未连接网关，无法添加项目」）。
+    val contentColor = if (enabled) palette.textPrimary else palette.textTertiary
     Box(
         modifier = modifier
             .size(44.dp)
             .background(palette.surfaceMuted, CircleShape)
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(role = Role.Button, enabled = enabled, onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center
     ) {
@@ -631,79 +624,9 @@ internal fun DshTonalCircleButton(
             painter = painterResource(iconRes),
             contentDescription = null,
             modifier = Modifier.size(21.dp),
-            colorFilter = ColorFilter.tint(palette.textPrimary)
+            colorFilter = ColorFilter.tint(contentColor)
         )
     }
-}
-
-/**
- * 当前项目目录指示卡：目录名 + 路径/未归属会话数 + 连接状态点。
- *
- * 不可点击：切换与新增项目都在底栏「项目」Tab（`ProjectsTabScreen`）。
- * 原先这里挂了 `WorkspaceSelectionMenu` 下拉，与底栏入口功能重复，且点开后会遮住
- * 下方刚加上的「最近活跃会话」。
- */
-@Composable
-private fun WorkspaceCard(
-    workspace: GatewayWorkspace?,
-    ungrouped: Boolean,
-    ungroupedCount: Int,
-    state: GatewayRuntimeState
-) {
-    val palette = dshPalette()
-    Row(
-        Modifier.fillMaxWidth()
-            .background(palette.surface, RoundedCornerShape(20.dp))
-            .border(1.dp, palette.cardBorder, RoundedCornerShape(20.dp))
-            .padding(horizontal = 16.dp, vertical = 15.dp)
-            .testTag("workspace-card"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Image(
-            painter = painterResource(R.drawable.ic_folder_outline),
-            contentDescription = null,
-            modifier = Modifier.size(22.dp),
-            colorFilter = ColorFilter.tint(palette.primary)
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                if (ungrouped) "未分组" else workspace?.title ?: "DeepseekHarnessProject",
-                color = palette.textPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
-            Text(
-                if (ungrouped) "$ungroupedCount 个未归属会话" else workspace?.path ?: "通过 Mobile Gateway 连接",
-                color = palette.textTertiary,
-                fontSize = 12.sp,
-                lineHeight = 15.sp,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
-        }
-        ConnectionDot(state)
-    }
-}
-
-@Composable
-private fun ConnectionDot(state: GatewayRuntimeState) {
-    val color = when (state.connection) {
-        GatewayConnectionState.CONNECTED -> DshColors.Success
-        GatewayConnectionState.FAILED -> DshColors.Danger
-        GatewayConnectionState.CONNECTING, GatewayConnectionState.AUTHENTICATING,
-        GatewayConnectionState.WAITING_FOR_NETWORK -> DshColors.Amber
-        else -> dshPalette().textTertiary
-    }
-    StatusIndicatorDot(
-        color = color,
-        modifier = Modifier.size(8.dp),
-        glowing = state.connection == GatewayConnectionState.CONNECTED
-    )
 }
 
 @Composable
@@ -734,6 +657,33 @@ internal fun workspaceScopedSessions(
         return sessions.filter { it.isVisibleInHistory && it.id !in assigned }
     }
     return sessions.filter { it.isVisibleInHistory && it.id in selected.sessionIds }
+}
+
+/**
+ * 抽屉「活跃」区块的数据投影：**近 24 小时内有活动的任务**，按最近活动倒序。
+ *
+ * 入参 [scopedSessions] 是不限项目的全量会话（`homeSessions`）——「活跃」区块**跨全部项目**
+ * 露出近 24h 任务，方便从其它项目快速切进来。项目过滤只作用于下方「任务」历史区块，
+ * 不在这里重复实现（避免再引入一个项目过滤源）。
+ * 这里只做 24 小时窗口筛选与排序：
+ *  - `lastActivityEpochSeconds` 是网关 / 离线缓存给出的活动时刻（秒）；
+ *  - 以当前时刻为界，活动时刻严格大于 `now - 24h` 才算「活跃」；
+ *  - `nowMillis` 默认取 `System.currentTimeMillis()`，但单测可注入固定时钟，避免依赖墙上时间。
+ *
+ * 空输入、或没有任何会话落在窗口内时返回空列表——抽屉据此整段跳过「活跃」区块，
+ * 不暴露「活跃 (0)」这类空洞分组。
+ *
+ * 下界用 `>` 而非 `>=`：恰好满 24 小时前的活动算「一天前」，不计入「近 24 小时」，
+ * 避免把一整天前的任务当成刚活跃过。
+ */
+internal fun drawerActiveSessions(
+    scopedSessions: List<SessionSummary>,
+    nowMillis: Long = System.currentTimeMillis()
+): List<SessionSummary> {
+    val cutoffSeconds = (nowMillis / 1_000) - 24 * 3_600
+    return scopedSessions
+        .filter { it.lastActivityEpochSeconds > cutoffSeconds && it.isVisibleInHistory }
+        .sortedByDescending(SessionSummary::lastActivityEpochSeconds)
 }
 
 internal fun relativeTime(

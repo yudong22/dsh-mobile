@@ -92,9 +92,17 @@ internal fun ScheduledTasksScreen(
     var revealedTaskId by remember { mutableStateOf<String?>(null) }
     var showsMutationError by remember { mutableStateOf(false) }
     val connection = stateHolder.gatewayState.connection
+    // 编辑/删除都是需要网关的动作，必须按唯一语义源禁用，而不是只看 busy。
+    val canMutate = !connection.dshBlocksNetworkActions
+    // 一次建索引，供列表 O(1) 查会话标题（见下方 items 内的使用）。
+    val sessionTitles = remember(stateHolder.snapshot.sessions) {
+        stateHolder.snapshot.sessions.associateBy({ it.id }, { it.title })
+    }
+    // 只在 ONLINE 刷新：原先「未连接且列表为空」也会发一次请求，而状态层随即以
+    //「连接网关后可查看定时任务」失败，页面再把它渲染成红色错误块——但 IDLE 的语义是
+    //「空闲态，不是错误」（DshConnectionStateUi.kt:23-24），不该当成错误展示。
     LaunchedEffect(connection) {
         if (connection == GatewayConnectionState.CONNECTED) stateHolder.refreshScheduledTasks()
-        else if (stateHolder.scheduledTasks.isEmpty()) stateHolder.refreshScheduledTasks()
     }
     Column(
         Modifier.fillMaxSize()
@@ -111,7 +119,18 @@ internal fun ScheduledTasksScreen(
             Text("定时任务", fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
                 color = palette.textPrimary)
             Spacer(Modifier.weight(1f))
-            Spacer(Modifier.size(46.dp))
+            // 顶栏右侧原本是 46dp 空占位。这里换成连接相位标签：断网时列表是断网前的
+            // 缓存（stale），没有任何标识会让用户以为看到的是最新状态。
+            Text(
+                text = homeConnectionBadge(connection),
+                color = if (connection == GatewayConnectionState.CONNECTED) {
+                    DshColors.Success
+                } else {
+                    palette.textTertiary
+                },
+                fontSize = 13.sp,
+                modifier = Modifier.testTag("scheduled-tasks-status")
+            )
         }
         when {
             stateHolder.scheduledTasksLoading && stateHolder.scheduledTasks.isEmpty() -> {
@@ -143,8 +162,10 @@ internal fun ScheduledTasksScreen(
                 items(stateHolder.scheduledTasks, key = { it.id }) { task ->
                     ScheduledTaskCard(
                         task = task,
-                        sessionTitle = stateHolder.snapshot.sessions.firstOrNull { it.id == task.sessionId }?.title
-                            ?: task.sessionId,
+                        // 建一次索引再查表：原先在 items lambda 里对每个 task 线性扫描
+                        // snapshot.sessions（O(tasks × sessions)），而 snapshot 每次 token 流
+                        // 都会重发布，列表滚动时会被反复放大。
+                        sessionTitle = sessionTitles[task.sessionId] ?: task.sessionId,
                         revealedTaskId = revealedTaskId,
                         onRevealChange = { revealedTaskId = it },
                         onOpenSession = {
@@ -158,6 +179,7 @@ internal fun ScheduledTasksScreen(
                             revealedTaskId = null
                             editingTask = task
                         },
+                        canMutate = canMutate,
                         onDelete = {
                             revealedTaskId = null
                             deletingTask = task
@@ -178,9 +200,11 @@ internal fun ScheduledTasksScreen(
             text = { Text("删除后任务及投递记录无法恢复；已进入会话队列的消息不会撤回。") },
             confirmButton = {
                 TextButton(onClick = {
-                    stateHolder.deleteScheduledTask(task)
+                    // deleteScheduledTask 在「未连接」等情况下返回 null。此时必须立即告知用户：
+                    // 否则对话框消失、任务仍留在列表里，用户无从得知删除其实没有发生。
+                    if (stateHolder.deleteScheduledTask(task) == null) showsMutationError = true
                     deletingTask = null
-                }) { Text("删除任务及投递记录", color = MaterialTheme.colorScheme.error) }
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { deletingTask = null }) { Text("取消") } }
         )
@@ -207,7 +231,10 @@ private fun ScheduledTaskCard(
     onOpenSession: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
-    busy: Boolean
+    busy: Boolean,
+    // 编辑/删除都要走网关，离线时必须禁用，否则点了才发现失败（参照首页
+    // `dshBlocksNetworkActions` 对「新建任务」的处理）。
+    canMutate: Boolean
 ) {
     val palette = dshPalette()
     val dark = palette.isDark
@@ -272,7 +299,7 @@ private fun ScheduledTaskCard(
                 ) {
                     IconButton(
                         onClick = onEdit,
-                        enabled = progress > 0.95f && task.status == "active" && !busy,
+                        enabled = progress > 0.95f && task.status == "active" && !busy && canMutate,
                         modifier = Modifier.size(50.dp)
                             .clip(CircleShape)
                             .background(
@@ -290,7 +317,7 @@ private fun ScheduledTaskCard(
                     }
                     IconButton(
                         onClick = onDelete,
-                        enabled = progress > 0.95f && !busy,
+                        enabled = progress > 0.95f && !busy && canMutate,
                         modifier = Modifier.size(50.dp).background(DshColors.Danger, CircleShape)
                     ) {
                         Icon(painterResource(R.drawable.ic_trash), contentDescription = "删除${task.title}",
@@ -439,10 +466,21 @@ private fun duration(seconds: Int): String = when {
     else -> "$seconds 秒"
 }
 
+private val scheduleInputPatterns = listOf("yyyy-MM-dd'T'HH:mm:ss.SSSX", "yyyy-MM-dd'T'HH:mm:ssX")
+private val scheduleOutputFormat = SimpleDateFormat("yyyy年M月d日 HH:mm", Locale.CHINA)
+
+/**
+ * 解析用 pattern 按 Locale 缓存复用。
+ *
+ * 原先每次调用都新建两个 `SimpleDateFormat` 并把输入串解析两遍，而本函数被三处调用
+ * （卡片时间行、下次执行时间、详情行），列表中每行每次重组都要付出这份开销。
+ * 对照 `relativeTime` 早已用 map 缓存 Calendar（`DshProductApp.kt:675-677`）。
+ */
 private fun formatScheduleDate(value: String): String {
-    val input = listOf("yyyy-MM-dd'T'HH:mm:ss.SSSX", "yyyy-MM-dd'T'HH:mm:ssX")
-    val date = input.firstNotNullOfOrNull { pattern ->
-        runCatching { SimpleDateFormat(pattern, Locale.US).parse(value) }.getOrNull()
+    val date = scheduleInputPatterns.firstNotNullOfOrNull { pattern ->
+        runCatching {
+            SimpleDateFormat(pattern, Locale.US).parse(value)
+        }.getOrNull()
     } ?: return value
-    return SimpleDateFormat("yyyy年M月d日 HH:mm", Locale.CHINA).format(date)
+    return scheduleOutputFormat.format(date)
 }

@@ -2,7 +2,6 @@ package com.clarklevis.dsh.android
 
 import android.view.WindowManager
 import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
@@ -17,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.rule.GrantPermissionRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -25,6 +25,22 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AndroidUiParityDeviceTest {
+    /**
+     * 测试期间预授予运行时权限：**否则一次全量回归会报出十余个假失败**。
+     *
+     * `DeepSeekHarnessAndroidApp` 冷启动时会请求 POST_NOTIFICATIONS。未授予时系统弹出的
+     * GrantPermissionsActivity 会抢到前台，把 MainActivity 压到 PAUSED：于是
+     * `ActivityScenario.recreate()` 等不到 RESUMED（实测卡满 47s 超时），而所有
+     * `createAndroidComposeRule<MainActivity>()` 的用例随后级联失败在
+     * "No compose hierarchies found in the app"。
+     *
+     * 真机首启弹权限框是正常产品行为，所以修在测试侧。
+     */
+    @get:Rule(order = 0)
+    val permissionRule: GrantPermissionRule = GrantPermissionRule.grant(
+        android.Manifest.permission.POST_NOTIFICATIONS,
+        android.Manifest.permission.CAMERA
+    )
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
 
@@ -51,9 +67,9 @@ class AndroidUiParityDeviceTest {
         // 因此这里只会命中首页那一个。
         compose.onNode(hasTestTag("new-task-button")).assertIsDisplayed()
         compose.onNode(hasText("新建任务")).assertIsDisplayed()
-        // 项目卡已退化为**纯指示**：断言它没有点击动作，而不是「点一下再断言菜单不存在」——
-        // 后者在卡片仍可点但菜单坏掉时也会通过，等于测不出这条退化。
-        compose.onNode(hasTestTag("workspace-card")).assertIsDisplayed().assertHasNoClickAction()
+        // 「当前项目」卡已整条移除：它不可点，且目录名与连接点在品牌头副标题里已有，
+        // 只是把会话列表往下推。这里断言它不再出现在首页，防止被顺手加回来。
+        compose.onNode(hasTestTag("workspace-card")).assertDoesNotExist()
         compose.onNode(hasTestTag("workspace-menu")).assertDoesNotExist()
         compose.onNode(hasText("添加工作区")).assertDoesNotExist()
         compose.onNode(hasTestTag("workspace-ungrouped")).assertDoesNotExist()
@@ -73,7 +89,7 @@ class AndroidUiParityDeviceTest {
         // 选中某个项目后应**自动回到任务列表**（「点项目」的意图是去看它的任务）。
         // 这里点「未分组」行，断言回到了首页而不是停在项目页。
         compose.onNode(hasTestTag("project-card-ungrouped")).performClick()
-        compose.onNode(hasTestTag("workspace-card")).assertIsDisplayed()
+        compose.onNode(hasTestTag("workspace-screen")).assertIsDisplayed()
         compose.onNode(hasTestTag("bottom-tab-bar")).assertIsDisplayed()
         // 再验证一次「返回」路径仍然可用（用于「添加项目」等不选中即离开的流程）。
         compose.onNode(hasTestTag("tab-projects")).performClick()

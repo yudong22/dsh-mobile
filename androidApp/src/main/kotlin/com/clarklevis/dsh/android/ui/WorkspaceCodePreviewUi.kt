@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -176,15 +178,56 @@ private fun CodePreviewToolbar(
     }
 }
 
+/**
+ * 一次高亮的完整结果：按行切好的 [lines] 与行号。
+ *
+ * 放在 IO 线程构建，而不是 `remember(document, dark) { highlightedCode(...) }`——
+ * 后者会在 composition 里遍历全文与全部 token 拼一个 2MB 级的 AnnotatedString，
+ * 主线程直接卡住。
+ */
+private class HighlightedDocument(
+    val lines: List<AnnotatedString>,
+    val gutter: List<String>
+)
+
+/**
+ * 按行虚拟化，而不是把行号和代码各自塞进一个巨大的 `Text`。
+ *
+ * 原先两个 `Text` 承载整份 2MB 文本：排版、测量与绘制都要一次性处理全文，
+ * 滚动前就会明显卡顿且占用大量内存。改为 LazyColumn 后只排版可见行。
+ */
+private fun highlightInBackground(document: WorkspaceCodeDocument, dark: Boolean): HighlightedDocument {
+    val full = highlightedCode(document, dark)
+    val text = document.text
+    val lineStarts = ArrayList<Int>(document.lineCount + 1)
+    lineStarts.add(0)
+    var index = text.indexOf('\n')
+    while (index >= 0) {
+        lineStarts.add(index + 1)
+        index = text.indexOf('\n', index + 1)
+    }
+    if (lineStarts.last() != text.length) lineStarts.add(text.length)
+    val lines = ArrayList<AnnotatedString>(lineStarts.size - 1)
+    for (i in 0 until lineStarts.size - 1) {
+        val start = lineStarts[i]
+        val end = lineStarts[i + 1].let { if (text.getOrNull(it - 1) == '\n') it - 1 else it }
+        lines.add(if (end > start) full.subSequence(start, end) as AnnotatedString else AnnotatedString(""))
+    }
+    val gutter = (1..lines.size).map(Int::toString)
+    return HighlightedDocument(lines, gutter)
+}
+
 @Composable
 private fun CodePreviewDocument(document: WorkspaceCodeDocument) {
     val palette = dshPalette()
     val dark = palette.isDark
-    val verticalScroll = rememberScrollState()
     val horizontalScroll = rememberScrollState()
-    val highlighted = remember(document, dark) { highlightedCode(document, dark) }
-    val lineNumbers = remember(document.lineCount) {
-        (1..document.lineCount).joinToString("\n")
+    // 高亮在 IO 构建：composition 里做这件事会在打开大文件时卡住主线程。
+    var highlighted by remember(document, dark) {
+        mutableStateOf<HighlightedDocument?>(null)
+    }
+    LaunchedEffect(document, dark) {
+        highlighted = withContext(Dispatchers.IO) { highlightInBackground(document, dark) }
     }
     val codeBackground = palette.canvas
     val gutterBackground = palette.surfaceMuted
@@ -208,35 +251,43 @@ private fun CodePreviewDocument(document: WorkspaceCodeDocument) {
             Spacer(Modifier.weight(1f))
             Text("${document.lineCount} 行 · UTF-8", color = secondary, fontSize = 12.sp)
         }
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .navigationBarsPadding()
-                .verticalScroll(verticalScroll),
-            verticalAlignment = Alignment.Top
-        ) {
-            Text(
-                text = lineNumbers,
-                modifier = Modifier
-                    .widthIn(min = 52.dp)
-                    .background(gutterBackground)
-                    .padding(start = 8.dp, end = 12.dp, top = 14.dp, bottom = 24.dp),
-                color = secondary,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
-                lineHeight = 20.sp,
-                textAlign = TextAlign.End
-            )
-            Text(
-                text = highlighted,
-                modifier = Modifier
-                    .horizontalScroll(horizontalScroll)
-                    .padding(start = 14.dp, end = 28.dp, top = 14.dp, bottom = 24.dp),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
-                lineHeight = 20.sp,
-                softWrap = false
-            )
+        when (val ready = highlighted) {
+            null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = palette.accent)
+            }
+            else -> LazyColumn(
+                modifier = Modifier.fillMaxSize().navigationBarsPadding(),
+                state = rememberLazyListState()
+            ) {
+                items(ready.lines.size) { index ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = ready.gutter[index],
+                            modifier = Modifier
+                                .widthIn(min = 52.dp)
+                                .background(gutterBackground)
+                                .padding(start = 8.dp, end = 12.dp),
+                            color = secondary,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            lineHeight = 20.sp,
+                            textAlign = TextAlign.End
+                        )
+                        Text(
+                            text = ready.lines[index],
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(horizontalScroll)
+                                .padding(start = 14.dp, end = 28.dp),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            lineHeight = 20.sp,
+                            softWrap = false
+                        )
+                    }
+                }
+                item { Spacer(Modifier.height(24.dp)) }
+            }
         }
     }
 }

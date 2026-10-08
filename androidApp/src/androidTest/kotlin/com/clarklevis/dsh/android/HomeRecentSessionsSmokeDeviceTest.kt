@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.rule.GrantPermissionRule
 import com.clarklevis.dsh.shared.gateway.GatewayConnectionState
 import org.json.JSONObject
 import org.junit.Assume.assumeTrue
@@ -23,6 +24,22 @@ import org.junit.Test
  * 握手、`sessions` 帧、`workspaces` 帧、首页组合串起来跑一遍。
  */
 class HomeRecentSessionsSmokeDeviceTest {
+    /**
+     * 测试期间预授予运行时权限：**否则一次全量回归会报出十余个假失败**。
+     *
+     * `DeepSeekHarnessAndroidApp` 冷启动时会请求 POST_NOTIFICATIONS。未授予时系统弹出的
+     * GrantPermissionsActivity 会抢到前台，把 MainActivity 压到 PAUSED：于是
+     * `ActivityScenario.recreate()` 等不到 RESUMED（实测卡满 47s 超时），而所有
+     * `createAndroidComposeRule<MainActivity>()` 的用例随后级联失败在
+     * "No compose hierarchies found in the app"。
+     *
+     * 真机首启弹权限框是正常产品行为，所以修在测试侧。
+     */
+    @get:Rule(order = 0)
+    val permissionRule: GrantPermissionRule = GrantPermissionRule.grant(
+        android.Manifest.permission.POST_NOTIFICATIONS,
+        android.Manifest.permission.CAMERA
+    )
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
 
@@ -48,7 +65,7 @@ class HomeRecentSessionsSmokeDeviceTest {
                     .fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithTag("home-recent-sessions").assertExists()
-            // 只有 1 条，未达上限 → 不应出现「全部 N」。
+            // 列表不再截断，因此也不该再有「全部 N」这种「被截掉了，去别处看」的入口。
             compose.onNodeWithTag("home-recent-show-all").assertDoesNotExist()
             // 会话行点进去应打开会话页（首页正文不再只是展示）。
             // 断言用宿主状态 + 首页区块消失，而不是找输入框：会话页的空态/加载态

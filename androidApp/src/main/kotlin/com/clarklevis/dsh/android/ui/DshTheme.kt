@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +27,14 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+
+/**
+ * 卡片体系的标准圆角：首页各卡片（空态、会话列表卡）与主行动按钮共用。
+ *
+ * 单独抽出来是为了让「新建任务」这类不是卡片的控件也能对齐同一套圆角，而不是各自
+ * 写死自己的值（按钮此前是 `height / 2` 的全圆角，看起来来自另一套体系）。
+ */
+internal val DshCardCornerRadius = RoundedCornerShape(20.dp)
 
 /**
  * 品牌色与固定语义色。

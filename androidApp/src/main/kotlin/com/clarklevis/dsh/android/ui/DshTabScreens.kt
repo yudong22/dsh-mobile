@@ -70,14 +70,22 @@ internal fun ProjectsTabScreen(
             session.isVisibleInHistory && workspaces.none { session.id in it.sessionIds }
         }
     }
-    LaunchedEffect(Unit) { stateHolder.refreshProductState() }
+    // 刷新以连接相位为 key：原先是 LaunchedEffect(Unit)，若首次进入时离线，
+    // 请求被状态层静默跳过，之后连接恢复也不会重跑，页面会长期停在缓存或空态。
+    val connection = stateHolder.gatewayState.connection
+    LaunchedEffect(connection) { stateHolder.refreshProductState(force = true) }
+    // 目录浏览要读远端目录，离线时必须禁用（此前「＋」始终可点，点了才弹「请先连接」）。
+    val canBrowse = !connection.dshBlocksNetworkActions
     Scaffold(
         containerColor = palette.canvas,
         topBar = {
             DshPageHeader(title = "项目", onBack = onBack) {
                 DshTonalCircleButton(
                     iconRes = R.drawable.ic_add,
+                    // description 保持稳定（读屏与测试都依赖它），禁用**原因**由下方
+                    // 的 footer 文案承载，而不是塞进无障碍标签里。
                     description = "添加项目",
+                    enabled = canBrowse,
                     onClick = { showDirectoryBrowser = true }
                 )
             }
@@ -112,10 +120,29 @@ internal fun ProjectsTabScreen(
                     }
                 )
             }
+            // 空态必须区分「真的没有项目」和「连不上所以看不到」：
+            // 离线时沿用旧的「还没有项目」会误导用户以为网关上确实没有项目
+            // （对比首页空态已按 dshPhase 分四档，HomeRecentSessions.kt:206）。
             if (workspaces.isEmpty()) {
                 item {
                     Text(
-                        "还没有项目。点击右上角「＋」把网关上的目录添加为项目。",
+                        if (connection.dshPhase == DshConnectionPhase.ONLINE) {
+                            "还没有项目。点击右上角「＋」把网关上的目录添加为项目。"
+                        } else {
+                            "${homeConnectionBadge(connection)}，连接后可查看网关上的项目。"
+                        },
+                        color = palette.textTertiary,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            }
+            // 离线时「＋」被禁用，必须说明原因，否则是一个「点了没反应」的死入口。
+            if (!canBrowse) {
+                item {
+                    Text(
+                        "未连接网关，暂时无法添加项目。",
                         color = palette.textTertiary,
                         fontSize = 14.sp,
                         lineHeight = 20.sp,

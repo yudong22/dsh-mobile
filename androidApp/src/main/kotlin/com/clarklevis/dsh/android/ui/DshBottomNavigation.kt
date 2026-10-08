@@ -341,6 +341,9 @@ internal fun DshBottomBarHost(
 
 /**
  * 截图首页的「新建任务」大胶囊：白色底、极细描边、居中图标 + 文字。
+ *
+ * 圆角用 [DshCardCornerRadius]（20dp）而不是自身高度的一半（26.5dp）：首页的卡片与
+ * 会话列表卡都是 20dp，按钮独自是全圆角会让它看起来来自另一套体系。
  */
 @Composable
 internal fun DshNewTaskButton(
@@ -357,8 +360,8 @@ internal fun DshNewTaskButton(
         modifier = modifier
             .fillMaxWidth()
             .height(53.dp)
-            .background(palette.surface, RoundedCornerShape(27.dp))
-            .border(1.dp, palette.cardBorder, RoundedCornerShape(27.dp))
+            .background(palette.surface, DshCardCornerRadius)
+            .border(1.dp, palette.cardBorder, DshCardCornerRadius)
             .clickable(role = Role.Button, enabled = enabled, onClick = onClick)
             .semantics { contentDescription = label }
             .testTag(testTag),

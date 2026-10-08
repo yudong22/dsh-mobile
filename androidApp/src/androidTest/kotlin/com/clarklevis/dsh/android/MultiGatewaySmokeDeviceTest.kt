@@ -4,13 +4,25 @@ import android.os.SystemClock
 import android.util.Base64
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.rule.GrantPermissionRule
 import com.clarklevis.dsh.shared.gateway.GatewayConnectionState
 import org.json.JSONObject
 import org.junit.Assume.assumeTrue
+import org.junit.Rule
 import org.junit.Test
 
 /** 需显式启用，并先启动 scripts/multi_gateway_smoke_server.py；普通设备回归跳过。 */
 class MultiGatewaySmokeDeviceTest {
+    /**
+     * 测试期间预授予运行时权限，见 AndroidUiParityDeviceTest 中同名规则的说明。
+     * 这里尤其关键：本类的 `scenario.recreate()` 正是被权限对话框打断后卡满 47s 超时的那条。
+     */
+    @get:Rule(order = 0)
+    val permissionRule: GrantPermissionRule = GrantPermissionRule.grant(
+        android.Manifest.permission.POST_NOTIFICATIONS,
+        android.Manifest.permission.CAMERA
+    )
+
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val hosts get() = (instrumentation.targetContext.applicationContext as DshAndroidApplication).hosts
 

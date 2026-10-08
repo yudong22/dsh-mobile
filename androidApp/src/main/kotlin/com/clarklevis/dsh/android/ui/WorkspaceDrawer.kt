@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.draw.rotate
+import com.clarklevis.dsh.android.AndroidSharedStateHolder
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +37,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +69,7 @@ import com.clarklevis.dsh.shared.domain.SessionSummary
 import com.clarklevis.dsh.shared.gateway.GatewayConnectionState
 import com.clarklevis.dsh.shared.protocol.GatewayWorkspace
 import kotlinx.coroutines.Job
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 
 private val drawerPageShape = RoundedCornerShape(48.dp)
@@ -75,7 +78,8 @@ private val drawerPageShape = RoundedCornerShape(48.dp)
  * 侧边抽屉，按参考截图优化后的结构：
  *
  * 设备行（图标 + 在线绿点 + 主机名 + 展开箭头）→ 新建任务胶囊 →
- * `任务 (n)` 区块（条目只有单行标题）→ `空间 (n)` 区块 →
+ * `活跃 (n)` 区块（近 24 小时有活动的任务，快速入口）→
+ * `任务 (n)` 区块（当前项目下的全部会话）→ `空间 (n)` 区块 →
  * 次级入口（插件 / 定时任务）→ 分隔线 → 账户卡。
  *
  * 会话的长按菜单可重命名 / 归档，是首页任务列表之外唯一的会话管理入口，必须保留。
@@ -84,6 +88,10 @@ private val drawerPageShape = RoundedCornerShape(48.dp)
 @Composable
 internal fun WorkspaceDrawer(
     sessions: List<SessionSummary>,
+    // 近 24 小时有活动的任务（已按当前项目过滤、按最近活动倒序）：抽屉「活跃」区块的
+    // 快速入口，点击与「任务」区块走同一套 onOpenSession → 任务对话页。由外壳用
+    // `drawerActiveSessions` 计算后传入，抽屉不自己再筛一遍。
+    drawerActiveSessions: List<SessionSummary>,
     gatewayLabel: String,
     connection: GatewayConnectionState,
     deviceIsServer: Boolean,
@@ -111,12 +119,30 @@ internal fun WorkspaceDrawer(
         val flingThresholdPx = with(density) { 400.dp.toPx() }
         var offsetPx by remember { mutableFloatStateOf(0f) }
         var horizontalDragActive by remember { mutableStateOf(false) }
+        // 抽屉拖动的防抖阈值（见下方 draggable 的说明）。
+        var dragAccumulatedPx by remember { mutableFloatStateOf(0f) }
+        var dragPassedSlop by remember { mutableStateOf(false) }
+        val dragSlopPx = with(density) { 12.dp.toPx() }
         var animationJob by remember { mutableStateOf<Job?>(null) }
         val scope = rememberCoroutineScope()
         val palette = dshPalette()
-        val progress = (offsetPx / drawerWidthPx).coerceIn(0f, 1f)
+        // offsetPx 是**每帧变化**的连续量。若在 composition 里直接派生 progress 并读取，
+        // 抽屉开合动画会让整个 BoxWithConstraints 作用域——连同调用处内联的 content lambda
+        // （NavHost + 首页列表 + 底栏）——逐帧重组，强跳过也救不了（lambda 每帧是新实例）。
+        //
+        // 因此这里只把**布尔派生量**暴露给 composition（用 derivedStateOf 去重，
+        // 只在实际跨越阈值时失效），连续值一律在 graphicsLayer / drawBehind 的 lambda 内读取，
+        // 那些 lambda 只走 draw 阶段、不触发重组。
+        fun progress() = (offsetPx / drawerWidthPx).coerceIn(0f, 1f)
+        val drawerOpened by remember { derivedStateOf { offsetPx > 0f } }
+        val drawerFullyOpen by remember { derivedStateOf { offsetPx >= drawerWidthPx * 0.98f } }
+        val canScrollVertically by remember {
+            derivedStateOf { !horizontalDragActive && offsetPx == 0f }
+        }
         // 两个区块各自可折叠，与标题上的箭头语义一致。
         var tasksExpanded by remember { mutableStateOf(true) }
+        // 「活跃」是默认展开的快捷入口：近 24 小时刚动过的任务优先露出，方便秒开。
+        var activeExpanded by remember { mutableStateOf(true) }
         // 「项目」是次级导航，默认收起：展开它会挤掉任务列表的可视高度。
         var spacesExpanded by remember { mutableStateOf(false) }
 
@@ -131,20 +157,20 @@ internal fun WorkspaceDrawer(
                 ) { value, _ -> offsetPx = value.coerceIn(0f, drawerWidthPx) }
             }
         }
-        BackHandler(enabled = progress > 0f) { settle(open = false) }
+        BackHandler(enabled = drawerOpened) { settle(open = false) }
 
         Box(Modifier.fillMaxSize().background(palette.drawerCanvas)) {
             Column(
                 modifier = Modifier.width(drawerWidth).fillMaxHeight()
                     .safeDrawingPadding()
                     .graphicsLayer {
-                        alpha = 0.6f + 0.4f * progress
-                        scaleX = 0.9f + 0.1f * progress
-                        scaleY = 0.9f + 0.1f * progress
+                        alpha = 0.6f + 0.4f * progress()
+                        scaleX = 0.9f + 0.1f * progress()
+                        scaleY = 0.9f + 0.1f * progress()
                         transformOrigin = TransformOrigin(0f, 0.5f)
                     }
                     .testTag("workspace-drawer")
-                    .then(if (progress == 0f) Modifier.clearAndSetSemantics {} else Modifier)
+                    .then(if (drawerOpened) Modifier else Modifier.clearAndSetSemantics {})
             ) {
                 // 设备行：图标（右上角状态点）+ 主机名 + 状态副标题 + 展开箭头。
                 // 点击展开设备下拉：切换已配对设备，或「新增匹配」进入扫码 / 手动配对。
@@ -245,18 +271,53 @@ internal fun WorkspaceDrawer(
                     testTag = "drawer-new-task"
                 )
 
-                DrawerSectionHeader(
-                    label = "任务",
-                    count = sessions.size,
-                    expanded = tasksExpanded,
-                    onToggle = { tasksExpanded = !tasksExpanded },
-                    palette = palette
-                )
-
                 LazyColumn(
                     modifier = Modifier.weight(1f).fillMaxWidth().testTag("drawer-task-list"),
                     contentPadding = PaddingValues(bottom = 8.dp)
                 ) {
+                    // 「活跃」区块：近 24 小时有活动的任务，作为高频快捷入口。它与「任务」
+                    // 区块一起在同一个 LazyColumn 内滚动，标题也作为列表项，保证两者滚动一致。
+                    // 它排在「任务」之前，让「刚动过的任务」一眼就能点进去，不必在完整历史里找。
+                    // 点击与「任务」行走同一套 onOpenSession → 任务对话页；切换任务后必须收起
+                    // 抽屉，否则半开着盖住刚切过去的任务对话页。
+                    if (drawerActiveSessions.isNotEmpty()) {
+                        item {
+                            DrawerSectionHeader(
+                                label = "活跃",
+                                count = drawerActiveSessions.size,
+                                expanded = activeExpanded,
+                                onToggle = { activeExpanded = !activeExpanded },
+                                palette = palette
+                            )
+                        }
+                        if (activeExpanded) {
+                            itemsIndexed(
+                                drawerActiveSessions,
+                                key = { _, session -> "active-${session.id}" }
+                            ) { _, session ->
+                                DrawerSessionRow(
+                                    session = session,
+                                    palette = palette,
+                                    isLast = false,
+                                    onClick = {
+                                        settle(open = false)
+                                        onOpenSession(session.id)
+                                    },
+                                    onRename = onRenameSession,
+                                    onArchive = onArchiveSession
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        DrawerSectionHeader(
+                            label = "任务",
+                            count = sessions.size,
+                            expanded = tasksExpanded,
+                            onToggle = { tasksExpanded = !tasksExpanded },
+                            palette = palette
+                        )
+                    }
                     if (tasksExpanded) {
                         if (sessions.isEmpty()) {
                             item {
@@ -327,7 +388,14 @@ internal fun WorkspaceDrawer(
                                 selected = ungroupedSelected,
                                 palette = palette,
                                 testTag = "drawer-space-ungrouped",
-                                onClick = { onSelectWorkspace(null) }
+                                // 必须传显式的 UNGROUPED_WORKSPACE_ID，不能传 null：
+                                // `resolveWorkspaceSelection(null, ...)` 在项目列表非空时会回退成
+                                // `workspaces.first()`（AndroidSharedStateHolder.kt:2609），
+                                // 于是「点未分组却选中了第一个项目」，首页标题与此处选中态同时说谎。
+                                // 项目页的同名入口一直是显式传 id 的（DshTabScreens.kt:98）。
+                                onClick = {
+                                    onSelectWorkspace(AndroidSharedStateHolder.UNGROUPED_WORKSPACE_ID)
+                                }
                             )
                         }
                         itemsIndexed(spaces, key = { _, w -> w.workspaceId }) { _, workspace ->
@@ -366,13 +434,15 @@ internal fun WorkspaceDrawer(
                 Modifier.fillMaxSize()
                     .graphicsLayer { translationX = offsetPx }
                     .then(
-                        if (progress > 0f) Modifier
+                        if (drawerOpened) Modifier
                             .dropShadow(
                                 shape = drawerPageShape,
                                 shadow = Shadow(
-                                    radius = 25.dp * progress,
-                                    color = Color.Black.copy(alpha = 0.18f * progress),
-                                    offset = DpOffset(x = -4.dp * progress, y = 0.dp)
+                                    // 半径固定、只让 alpha 跟随 progress：半径每帧变化会
+                                    // 造成大范围形变裁剪，是开关抽屉时掉帧的主因之一。
+                                    radius = 25.dp,
+                                    color = Color.Black.copy(alpha = 0.18f * progress()),
+                                    offset = DpOffset(x = -4.dp * progress(), y = 0.dp)
                                 )
                             )
                             .clip(drawerPageShape)
@@ -381,12 +451,25 @@ internal fun WorkspaceDrawer(
                     .draggable(
                         orientation = Orientation.Horizontal,
                         state = rememberDraggableState { delta ->
+                            // 手势防抖：累计位移未超过阈值前不开始跟手。
+                            // 否则一次轻微的横向误触（例如在列表上斜着滑）也会把抽屉拖开一条缝，
+                            // 表现为"抽屉自己抖了一下"。
+                            dragAccumulatedPx += delta
+                            if (!dragPassedSlop) {
+                                if (abs(dragAccumulatedPx) < dragSlopPx) return@rememberDraggableState
+                                dragPassedSlop = true
+                            }
                             animationJob?.cancel()
                             offsetPx = (offsetPx + delta).coerceIn(0f, drawerWidthPx)
                         },
-                        onDragStarted = { horizontalDragActive = true },
+                        onDragStarted = {
+                            horizontalDragActive = true
+                            dragAccumulatedPx = 0f
+                            dragPassedSlop = false
+                        },
                         onDragStopped = { velocity ->
                             horizontalDragActive = false
+                            dragPassedSlop = false
                             val open = when {
                                 velocity > flingThresholdPx -> true
                                 velocity < -flingThresholdPx -> false
@@ -398,8 +481,8 @@ internal fun WorkspaceDrawer(
                     .background(palette.canvas)
                     .testTag("workspace-drawer-main")
             ) {
-                content({ settle(open = true) }, !horizontalDragActive && offsetPx == 0f)
-                if (progress > 0.98f) {
+                content({ settle(open = true) }, canScrollVertically)
+                if (drawerFullyOpen) {
                     Box(
                         Modifier.fillMaxSize().clickable(
                             role = Role.Button,

@@ -2,26 +2,27 @@ package com.clarklevis.dsh.android.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -32,51 +33,41 @@ import com.clarklevis.dsh.shared.domain.SessionSummary
 import com.clarklevis.dsh.shared.gateway.GatewayConnectionState
 
 /**
- * 首页「最近活跃会话」的展示条数上限。
+ * 会话行的高度：`vertical = 18.dp` 是行内上下内边距，配合 16sp 标题后单行约 61dp。
  *
- * 上限存在的理由不是性能（列表最多几百条），而是**版面比例**：当前项目卡 + 新建会话已占掉
- * 首屏上半部，再把整个项目的会话铺满会把「最近活跃」淹没成长列表。超出部分由标题行的
- * 「全部 N」入口承担——它打开抽屉（同一条 `workspaceScopedSessions` 过滤结果，含完整长按菜单），
- * 因此这里截断不会让任何会话变得不可达。
+ * 抽成常量而不是内联，是因为它同时决定列表的「密度」与可点区域：此前 11dp 时
+ * 行高约 47dp，长标题与时间挤在一起；加高后每屏条数变少，但一行更像一个可点目标。
  */
-internal const val HOME_RECENT_SESSION_LIMIT = 6
+internal val HOME_SESSION_ROW_PADDING = PaddingValues(horizontal = 14.dp, vertical = 18.dp)
 
 /**
- * 首页最近会话的投影：**已按项目过滤的会话**里，按最近活动时间倒序取前 [limit] 条。
+ * 首页最近会话的投影：**已按项目过滤的会话**按最近活动时间倒序，**不截断**。
  *
  * 入参是 [workspaceScopedSessions] 的结果而不是原始会话表——项目过滤有且只有一份实现
  * （见 [workspaceScopedSessions]），首页与抽屉都必须复用它，不能各写一套。
  *
  * 排序在这里显式做：网关的 `sessions` 帧本身按 `lastActivityEpochSeconds` 倒序，
  * 但离线缓存的恢复路径不保证顺序，不重排会让冷启动后的首页顺序漂移。
+ *
+ * 不截断是有意的：首页列表就是这一屏的主体，条数上限交给滚动本身。此前截到 6 条时
+ * 「最近活跃」覆盖不到稍早的任务，用户还得开抽屉才能找到，而抽屉只是同一份数据的第二个视图。
  */
-internal fun homeRecentSessions(
-    scopedSessions: List<SessionSummary>,
-    limit: Int = HOME_RECENT_SESSION_LIMIT
-): List<SessionSummary> = scopedSessions
-    .sortedByDescending(SessionSummary::lastActivityEpochSeconds)
-    .take(limit.coerceAtLeast(0))
+internal fun homeRecentSessions(scopedSessions: List<SessionSummary>): List<SessionSummary> =
+    scopedSessions.sortedByDescending(SessionSummary::lastActivityEpochSeconds)
 
 /**
- * 标题行的「全部 N」入口是否出现：**仅当确实被截断**时出现。
+ * 首页的「最近活跃」区块：标题行（标题 + 连接短标签）与**完整**的会话列表。
  *
- * 抽成纯函数是为了让这条契约可测：`totalCount` 与展示条数是两个独立量，
- * 若调用方误把展示条数当成总数传进来，入口会静默消失且不报错。
- */
-internal fun homeRecentShowsAllEntry(totalCount: Int, shownCount: Int): Boolean =
-    totalCount > shownCount
-
-/**
- * 首页的「最近活跃」区块：标题行（标题 + 连接短标签 + 截断时的「全部 N」）
- * 与最多 [HOME_RECENT_SESSION_LIMIT] 条会话行。
- *
- * [allSessions] 是**已按当前项目过滤**的完整列表；本区块自行截断，所以「全部 N」用的总数
- * 与展示条数不可能由调用方传错。
+ * [allSessions] 是**已按当前项目过滤**的完整列表，本区块只排序、不再截断。
  *
  * 三种态各有明确文案，不留空白：
  *  - 已连接但当前项目没有会话 → 「当前项目还没有会话…」；
  *  - 连接中且列表为空（尚无离线缓存播种）→ 进度文案，不能说成「没有会话」；
  *  - 未连接但有缓存/历史会话 → 照常展示，标题右侧标成「离线」而不是「已连接」。
+ *
+ * 列表是 [LazyColumn]（会话可以有很多条）并独占 [modifier] 给出的剩余高度：条数不受限，
+ * 一屏放得下多少就显示多少，其余在卡片内滚动。卡片面随视口一起撑满，让整块列表读起来
+ * 是一个连续的表面，而不是浮在中间的一小条。
  *
  * 会话行复用 [SessionRowActions]，因此首页也能长按重命名 / 归档，不必先开抽屉。
  */
@@ -87,8 +78,8 @@ internal fun HomeRecentSessions(
     onOpenSession: (String) -> Unit,
     onRenameSession: (String, String) -> Unit,
     onArchiveSession: (String) -> Unit,
-    onShowAll: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    canScrollVertically: Boolean = true
 ) {
     val palette = dshPalette()
     val sessions = remember(allSessions) { homeRecentSessions(allSessions) }
@@ -116,73 +107,62 @@ internal fun HomeRecentSessions(
                 modifier = Modifier.testTag("home-recent-status"),
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
-            Spacer(Modifier.weight(1f))
-            // 「全部 N」只在确实被截断时给出：没有更多内容时留一个点了没反应的入口只是噪音。
-            if (homeRecentShowsAllEntry(totalCount = allSessions.size, shownCount = sessions.size)) {
-                Text(
-                    text = "抽屉查看全部 ${allSessions.size}",
-                    color = palette.primary,
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .clickable(role = Role.Button, onClick = onShowAll)
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                        .testTag("home-recent-show-all"),
-                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                )
-            }
         }
         Spacer(Modifier.height(10.dp))
         if (sessions.isEmpty()) {
+            // 空态卡按内容高度收拢而不是撑满：一条提示占满整屏反而更像加载失败。
             HomeRecentEmptyState(connection = connection)
         } else {
-            Column(
-                modifier = Modifier.fillMaxWidth()
+            LazyColumn(
+                // weight(1f)：吃掉标题行之后的剩余高度，让列表卡撑满底栏上方的空间。
+                modifier = Modifier.fillMaxWidth().weight(1f)
                     .background(palette.surface, RoundedCornerShape(20.dp))
-                    .border(1.dp, palette.cardBorder, RoundedCornerShape(20.dp)),
-                verticalArrangement = Arrangement.spacedBy(0.dp)
+                    .border(1.dp, palette.cardBorder, RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(20.dp))
+                    .testTag("home-session-list"),
+                contentPadding = PaddingValues(bottom = 4.dp),
+                // 抽屉横向拖动期间交出滚动权：否则在手势仲裁里和抽屉抢同一次拖动。
+                userScrollEnabled = canScrollVertically
             ) {
-                sessions.forEachIndexed { index, session ->
-                    // 按 session.id 加 key：本区块是**非 lazy** Column，而列表会随最近活动
-                    // 时间重排（一次 turn/end 就能让某行跳到顶部）。不加 key 时行内状态
-                    // （展开的菜单 / 正在重命名的对话框）会留在原索引上，于是「正在改 A」
-                    // 会挂到移动过来的 B 上，确认时改错会话且丢掉刚输入的文字。
-                    key(session.id) {
-                        SessionRowActions(
-                            session = session,
-                            onClick = { onOpenSession(session.id) },
-                            onRename = onRenameSession,
-                            onArchive = onArchiveSession,
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 11.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.testTag("home-session-${session.id}")
-                        ) {
-                            SessionActivityDot(session = session)
-                            Text(
-                                text = session.title,
-                                color = palette.textPrimary,
-                                fontSize = 16.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                                style = TextStyle(
-                                    platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                )
+                // key = session.id：列表会随最近活动时间重排（一次 turn/end 就能让某行跳顶），
+                // 不设 key 时行内状态（展开的菜单 / 正在重命名的对话框）会留在原索引上，
+                // 于是「正在改 A」会挂到移动过来的 B 上，确认时改错会话且丢掉刚输入的文字。
+                itemsIndexed(sessions, key = { _, session -> session.id }) { index, session ->
+                    SessionRowActions(
+                        session = session,
+                        onClick = { onOpenSession(session.id) },
+                        onRename = onRenameSession,
+                        onArchive = onArchiveSession,
+                        contentPadding = HOME_SESSION_ROW_PADDING,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.testTag("home-session-${session.id}")
+                    ) {
+                        SessionActivityDot(session = session)
+                        Text(
+                            text = session.title,
+                            color = palette.textPrimary,
+                            fontSize = 16.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                            style = TextStyle(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
                             )
-                            Text(
-                                text = if (session.isRunning) {
-                                    "运行中"
-                                } else {
-                                    relativeTime(session.lastActivityEpochSeconds)
-                                },
-                                color = if (session.isRunning) DshColors.Success else palette.textTertiary,
-                                fontSize = 13.sp,
-                                maxLines = 1,
-                                modifier = Modifier.testTag("home-session-time-${session.id}"),
-                                style = TextStyle(
-                                    platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                )
+                        )
+                        Text(
+                            text = if (session.isRunning) {
+                                "运行中"
+                            } else {
+                                relativeTime(session.lastActivityEpochSeconds)
+                            },
+                            color = if (session.isRunning) DshColors.Success else palette.textTertiary,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            modifier = Modifier.testTag("home-session-time-${session.id}"),
+                            style = TextStyle(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
                             )
-                        }
+                        )
                     }
                     if (index != sessions.lastIndex) {
                         Box(
@@ -251,7 +231,7 @@ private fun HomeRecentEmptyState(connection: GatewayConnectionState) {
 /**
  * 标题右侧的连接短标签。
  *
- * 首页已经有两处连接指示（品牌头的 `header-connection-dot` 与项目卡的 `ConnectionDot`），
+ * 首页已有两处连接指示（品牌头的 `header-connection-dot` 与底栏），
  * 这里不是「补上缺失的指示」，而是让「最近活跃」区块自带上下文：会话可能来自离线缓存，
  * 光看列表分不清「这些是刚同步的」还是「这些是断网前的」。
  */

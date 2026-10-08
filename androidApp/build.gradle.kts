@@ -48,9 +48,16 @@ android {
         applicationId = "com.clarklevis.dsh.android"
         minSdk = 24
         targetSdk = 36
-        versionCode = 19
-        versionName = "1.9.0"
+        versionCode = 20
+        versionName = "1.9.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    testOptions {
+        // 关掉系统动画：设备测试此前在有动画的模拟器上要多等每个 Compose 断言同步。
+        // 这是 AGP 的官方开关（等价于逐个 adb settings put global *_animation_scale 0），
+        // 只作用于连测的设备，不影响 App 运行时的动画表现。
+        animationsDisabled = true
     }
 
     signingConfigs {
@@ -143,6 +150,7 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(composeBom)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 }

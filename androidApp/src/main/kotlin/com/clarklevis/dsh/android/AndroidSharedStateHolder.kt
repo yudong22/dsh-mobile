@@ -1010,6 +1010,28 @@ class AndroidSharedStateHolder(
      */
     val homeSessions: List<SessionSummary> by derivedStateOf { snapshot.sessions }
 
+    /**
+     * 设置页所需的字段级投影。
+     *
+     * 与 [homeSessions] 同理：直接读 `snapshot.xxx` 会让设置页订阅**整份** snapshot，
+     * 而快照是单个 `mutableStateOf`，会话流式回复时最短每 32ms 发布一次——设置页会因此
+     * 以约 31fps 整页重组（对照 `DshProductApp.kt:93-95` 与 `DshTabScreens.kt:66-67`
+     * 两处对同一反模式的警告）。
+     */
+    val permissionDefault: String? by derivedStateOf { snapshot.permissionDefault }
+    val permissionDefaultOptions: List<com.clarklevis.dsh.shared.protocol.GatewayPermissionOption>
+        by derivedStateOf { snapshot.permissionDefaultOptions }
+    val agentPresets: List<com.clarklevis.dsh.shared.protocol.GatewayAgentPreset>
+        by derivedStateOf { snapshot.agentPresets }
+    val agentPresetDefault: String? by derivedStateOf { snapshot.agentPresetDefault }
+    val modelCatalog: com.clarklevis.dsh.shared.protocol.GatewayModelCatalog?
+        by derivedStateOf { snapshot.modelCatalog }
+    val defaultModel: com.clarklevis.dsh.shared.protocol.GatewayModelSelection?
+        by derivedStateOf { snapshot.defaultModel }
+    val hostSnapshot: com.clarklevis.dsh.shared.protocol.GatewayHostSnapshot?
+        by derivedStateOf { snapshot.hostSnapshot }
+
+
     private val rawWorkspaces: List<GatewayWorkspace> by derivedStateOf { snapshot.workspaces }
 
     /**
@@ -1171,9 +1193,25 @@ class AndroidSharedStateHolder(
         completedWorkspaceFile = null
     }
 
-    fun refreshProductState() {
+    /**
+     * 一次全量刷新：workspaces / sessions / agent-presets / defaults / default-model /
+     * models / host 七组请求。
+     *
+     * 三个 Tab 页（首页、项目、设置）进入时都会调它，来回切 Tab 会重复发出整组请求。
+     * 这里加**短 TTL 合并**：TTL 内的重复调用直接跳过，只有首次或过期后才真正发请求。
+     * 连接相位变化时必须强制刷新（重连后数据已经陈旧），因此提供 [force] 路径由
+     * `LaunchedEffect(connection)` 的调用方按需触发。
+     */
+    private var productStateRefreshAtMillis = 0L
+    private val productStateRefreshTtlMillis = 3_000L
+
+    fun refreshProductState(force: Boolean = false) {
         val appGraph = graph ?: return
         if (gatewayState.connection != GatewayConnectionState.CONNECTED) return
+        val now = System.currentTimeMillis()
+        // TTL 内跳过：避免切 Tab / 配置变更导致的重复七连发。
+        if (!force && now - productStateRefreshAtMillis < productStateRefreshTtlMillis) return
+        productStateRefreshAtMillis = now
         defaultConfigurationLoadingKinds = defaultConfigurationLoadingKinds + setOf(
             "agent-presets",
             "defaults",
@@ -1248,7 +1286,12 @@ class AndroidSharedStateHolder(
 
     fun archiveSession(sessionId: String) {
         val appGraph = graph ?: return
-        if (gatewayState.connection != GatewayConnectionState.CONNECTED) return
+        // 离线必须给提示而不是静默 return：用户在长按菜单里点了「删除（归档）」并确认，
+        // 如果什么都不发生，他会以为已经归档了，而这条会话其实还留在列表里。
+        if (gatewayState.connection != GatewayConnectionState.CONNECTED) {
+            platformError = "未连接网关，暂时无法归档会话"
+            return
+        }
         appGraph.gatewayScope.launch {
             appGraph.gatewayRuntime.sendRequest(GatewayRequests.archiveSession(sessionId))
         }
@@ -1256,7 +1299,11 @@ class AndroidSharedStateHolder(
 
     fun renameSession(sessionId: String, title: String) {
         val appGraph = graph ?: return
-        if (gatewayState.connection != GatewayConnectionState.CONNECTED || title.isBlank()) return
+        if (gatewayState.connection != GatewayConnectionState.CONNECTED) {
+            platformError = "未连接网关，暂时无法重命名会话"
+            return
+        }
+        if (title.isBlank()) return
         appGraph.gatewayScope.launch {
             appGraph.gatewayRuntime.sendRequest(GatewayRequests.renameSession(sessionId, title))
         }
@@ -1334,17 +1381,29 @@ class AndroidSharedStateHolder(
 
     fun setDefault(target: String, value: String) {
         val appGraph = graph ?: return
+        // 未连接时 sendRequest 会被 GatewayRuntime 直接 reject（ERROR_NOT_CONNECTED），
+        // 而这里原本只把 loading 摘掉、不写 platformError，于是用户在确认弹窗里点了「确认修改」，
+        // 转圈消失、页面没有任何变化，却以为已经改成功了。
+        if (gatewayState.connection != GatewayConnectionState.CONNECTED) {
+            platformError = "未连接网关，无法修改部署级设置"
+            return
+        }
         defaultConfigurationLoadingKinds = defaultConfigurationLoadingKinds + "set-default"
         appGraph.gatewayScope.launch {
             val accepted = appGraph.gatewayRuntime.sendRequest(GatewayRequests.setDefault(target, value))
             if (!accepted) withContext(Dispatchers.Main.immediate) {
                 defaultConfigurationLoadingKinds = defaultConfigurationLoadingKinds - "set-default"
+                platformError = "修改未生效，请检查网关连接后重试"
             }
         }
     }
 
     fun saveDefaultModel(provider: String, model: String, reasoningEffort: String?) {
         val appGraph = graph ?: return
+        if (gatewayState.connection != GatewayConnectionState.CONNECTED) {
+            platformError = "未连接网关，无法保存默认模型"
+            return
+        }
         defaultConfigurationLoadingKinds = defaultConfigurationLoadingKinds + "save-default-model"
         appGraph.gatewayScope.launch {
             val accepted = appGraph.gatewayRuntime.sendRequest(
@@ -1353,6 +1412,7 @@ class AndroidSharedStateHolder(
             if (!accepted) withContext(Dispatchers.Main.immediate) {
                 defaultConfigurationLoadingKinds =
                     defaultConfigurationLoadingKinds - "save-default-model"
+                platformError = "保存未生效，请检查网关连接后重试"
             }
         }
     }
