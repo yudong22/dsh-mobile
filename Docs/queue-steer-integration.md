@@ -48,7 +48,7 @@ Android 与 iOS 输入框上方显示 Host 队列。只有 `placement=queued` �
 
 完整 Android 设备测试另有失败，不能表述为全量设备测试通过。已在未包含此次改动的主干 `62cf92b` 隔离副本复现两项失败：
 
-1. `AndroidAppGraphFakeIntegrationDeviceTest.injectedProductGraphRunsRuntimeHolderProjectionHistoryAndVisibleAttachment`：旧分页用例未取得预期 `beforeSeq`。
+1. `AndroidAppGraphFakeIntegrationDeviceTest.injectedProductGraphRunsRuntimeHolderProjectionHistoryAndVisibleAttachment`：旧分页用例未取得预期 `beforeSeq`。**已修复**（真实根因见 `Docs/pre-existing-device-failures-repair.md`）。
 2. `AndroidUiParityDeviceTest.offlineNewSessionOpensComposerWithoutShowingAnInternalSubscribeError`：离线新会话界面断言失败。
 
 键盘设备用例 `inputFocusMovesLatestMessageAboveImeAndTimelineTapHidesIme` 在当前分支单独复查通过，完整设备套件中的失败未在单独运行时重现。

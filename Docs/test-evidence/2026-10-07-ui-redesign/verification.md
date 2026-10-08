@@ -98,7 +98,8 @@ ANDROID_SERIAL=emulator-5554 ./gradlew :androidApp:connectedDebugAndroidTest
 
 `Starting 44 tests on medium_phone(AVD) - 16` → **43 通过 / 1 skipped / 2 failed**。
 
-两个失败**均为改版前既有问题**，用基线 worktree 做了 A/B 对照证明：
+两个失败**均为改版前既有问题**，用基线 worktree 做了 A/B 对照证明
+（后续已在 `Docs/pre-existing-device-failures-repair.md` 定位到真实根因并修复，设备套件现 50 项全绿）：
 
 | 失败用例 | 本分支结果 | 基线 `HEAD` 结果 | 判定 |
 | --- | --- | --- | --- |
@@ -238,6 +239,8 @@ ANDROID_SERIAL=emulator-5554 ./gradlew :androidApp:connectedDebugAndroidTest
 - **Markwon 代码块围栏底色**由 Markwon 默认 Theme 提供，未在 `DshMarkdownText.kt` 覆盖，
   建议后续目视确认深色模式代码块。
 - `AndroidAppGraphFakeIntegrationDeviceTest` 的 `beforeSeq` 缺失属 shared/transport 侧的既有
-  问题，不在 UI 改版范围。
+  问题，不在 UI 改版范围。**已修复**：根因是 `GatewayRuntime.requestHistory()` 在缺
+  `historyFormatVersion` 时静默丢弃游标（产品缺陷）+ 夹具 hello 未按真实协议携带该字段 +
+  一条与 stream-id 契约矛盾的过期断言。详见 `Docs/pre-existing-device-failures-repair.md`。
 - **设备用例未进 CI**：`.github/workflows/*.yml` 只跑单测 + lint + assemble，不跑
   `connectedDebugAndroidTest`，因此设备用例的失败面只能在本地模拟器复核。

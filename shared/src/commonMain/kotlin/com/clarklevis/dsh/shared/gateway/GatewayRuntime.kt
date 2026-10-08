@@ -274,8 +274,16 @@ class GatewayRuntime(
         historyFormatVersion: Int? = null
     ): Boolean = serialized {
         if (beforeSequence != null && historyFormatVersion == null) {
-            return@serialized sendRequestLocked(GatewayRequests.history(sessionId, maxMessages = maxMessages,
-                maxBytes = maxBytes, view = view))
+            // 缺游标格式版本时**不能**静默降级成「不带游标」的请求：那会取回**最新一页**，
+            // 而调用方以为翻到了更早的历史。宿主（session-controller）要求
+            // `beforeSeq` 必须与读取时的 `historyFormatVersion` 同时出现，否则回
+            // `history-format-mismatch`；在客户端静默丢掉游标只会让「上翻加载更多」原地重复
+            // 取回同一页，列表不前进却反复转圈，且没有任何可诊断的错误码。
+            //
+            // 这里 fail-closed：显式拒绝并让 UI 走 history 的既有失败路径
+            // （清分页 loading、提示重载会话基线），而不是发出语义错误的请求。
+            rejectLocked("history", ERROR_HISTORY_CURSOR_WITHOUT_FORMAT, targetSessionId = sessionId)
+            return@serialized false
         }
         sendRequestLocked(GatewayRequests.history(sessionId, beforeSequence, maxMessages, maxBytes, view,
             historyFormatVersion))
@@ -1202,6 +1210,7 @@ class GatewayRuntime(
         private const val ERROR_TRANSPORT_FAILED = "transport-failed"
         private const val ERROR_GATEWAY_REQUEST = "gateway-request-failed"
         private const val ERROR_IMAGE_LIMITS = "image-limits-exceeded"
+        private const val ERROR_HISTORY_CURSOR_WITHOUT_FORMAT = "history-cursor-without-format"
         private const val ERROR_REQUEST_BUSY = "request-busy"
         private const val ERROR_COALESCED = "request-coalesced"
         private const val ERROR_CONNECTION_REPLACED = "connection-replaced"

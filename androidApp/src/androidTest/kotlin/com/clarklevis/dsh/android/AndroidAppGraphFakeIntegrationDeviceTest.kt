@@ -40,6 +40,12 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AndroidAppGraphFakeIntegrationDeviceTest {
+    /**
+     * 与 dsh-plugin-mobile-gateway 的 `SESSION_FORMAT_VERSION` 对齐的会话格式版本。
+     * 夹具必须像真实网关一样在 hello 与 history 帧里带上它，否则分页游标无处可取。
+     */
+    private val SESSION_FORMAT_VERSION = 4
+
     @Test
     fun queueRoundTripKeepsDraftUntilAckAndEditResubmitsThenSteers() = runBlocking {
         val transport = FakeTransport()
@@ -107,7 +113,15 @@ class AndroidAppGraphFakeIntegrationDeviceTest {
         val holder = graph.stateHolder
         waitUntil { transport.specs.isNotEmpty() }
         transport.open()
-        transport.receive("""{"kind":"hello","authenticated":true,"protocol":3}""")
+        // 与真实网关一致：hello 必须带 historyFormatVersion，分页游标才有格式版本可带。
+        // 真实网关始终发送该字段（见 dsh-plugin-mobile-gateway/lib/index.mjs 的 hello 帧），
+        // PROTOCOL.md 也规定「hasMore 为真时用 beforeSeq + historyFormatVersion 请求更早一页」。
+        // 本夹具此前省略该字段，于是客户端翻页时拿不到格式版本——这正是既有失败的成因。
+        // 刻意**不**声明 assistant-stream-v1：本用例验证的是历史分页与附件，声明该能力会把
+        // 投影切到快照/流式路径，那是另一批用例的覆盖面。
+        transport.receive(
+            """{"kind":"hello","authenticated":true,"protocol":3,"historyFormatVersion":$SESSION_FORMAT_VERSION}"""
+        )
         waitUntil { holder.gatewayState.connection.name == "CONNECTED" }
         transport.receive("""{"kind":"pong","message":"${"x".repeat(1_000_000)}"}""")
         waitUntil { synchronized(decoderThreads) { decoderThreads.size >= 2 } }
@@ -121,8 +135,10 @@ class AndroidAppGraphFakeIntegrationDeviceTest {
         assertEquals(60, initialHistoryRequest.getValue("maxMessages").jsonPrimitive.int)
         assertEquals(4 * 1_024 * 1_024, initialHistoryRequest.getValue("maxBytes").jsonPrimitive.int)
         assertEquals("conversation", initialHistoryRequest.getValue("view").jsonPrimitive.content)
+        // 首页/首屏请求不带游标，因此不得携带格式版本（协议只要求游标与版本成对出现）。
+        assertTrue("首屏 history 不应带 beforeSeq", "beforeSeq" !in initialHistoryRequest)
         transport.receive(
-            """{"kind":"history","sessionId":"android-demo","events":[{"type":"user/message","seq":1,"time":1,"data":{"content":[{"type":"text","text":"product-history"}],"source":{"kind":"user"}}}],"hasMore":true,"nextBeforeSeq":0,"bytes":64}"""
+            """{"kind":"history","sessionId":"android-demo","historyFormatVersion":$SESSION_FORMAT_VERSION,"events":[{"type":"user/message","seq":1,"time":1,"data":{"content":[{"type":"text","text":"product-history"}],"source":{"kind":"user"}}}],"hasMore":true,"nextBeforeSeq":0,"bytes":64}"""
         )
         waitUntil { holder.snapshot.conversation.any { it.text == "product-history" } }
         delay(100)
@@ -132,9 +148,14 @@ class AndroidAppGraphFakeIntegrationDeviceTest {
         waitUntil { transport.sentTypes.count { it == "history" } == historyBefore + 2 }
         val olderHistoryRequest = transport.payloadsOfType("history").last()
         assertEquals(1, olderHistoryRequest.getValue("beforeSeq").jsonPrimitive.int)
+        // 游标必须与格式版本成对：缺任一都会被宿主以 history-format-mismatch 拒绝。
+        assertEquals(
+            SESSION_FORMAT_VERSION,
+            olderHistoryRequest.getValue("historyFormatVersion").jsonPrimitive.int
+        )
         assertEquals("conversation", olderHistoryRequest.getValue("view").jsonPrimitive.content)
         transport.receive(
-            """{"kind":"history","sessionId":"android-demo","events":[],"hasMore":false,"bytes":0}"""
+            """{"kind":"history","sessionId":"android-demo","historyFormatVersion":$SESSION_FORMAT_VERSION,"events":[],"hasMore":false,"bytes":0}"""
         )
         waitUntil { !holder.snapshot.selectedHistoryIsLoading }
 
@@ -158,11 +179,21 @@ class AndroidAppGraphFakeIntegrationDeviceTest {
         transport.receive(
             """{"sessionId":"android-demo","seq":1202,"time":1202,"event":{"type":"assistant/message","turn":2,"step":1,"text":"$finalText"}}"""
         )
+        // 流式回复在定稿时会**保留**原 `stream-` id（原地 replace，不 remove+insert），
+        // 这样 LazyColumn 的行身份与平台渲染器持有的 parser/source 不会在最后一条消息到来时
+        // 被拆掉重建。契约由 shared 侧钉住：ProjectionAndHistoryTest.kt:42 断言
+        // `stream-text-1-1`，SharedConversationStoreTest 断言 replace 的 itemId 就是该 id。
+        //
+        // 因此这里**不能**断言「stream- id 消失」——那是 97a44e5 之前的旧语义。
+        // 要验证的是「流已定稿」：文本等于最终全文，且只剩一条（流式占位被原地替换，没有重复）。
         waitUntil {
-            holder.snapshot.conversation.any { it.text == finalText } &&
-                holder.snapshot.conversation.none { it.id.startsWith("stream-") }
+            holder.snapshot.conversation.any { it.text == finalText }
         }
-        assertTrue(holder.snapshot.conversation.none { it.id.startsWith("stream-") })
+        val assistantItems = holder.snapshot.conversation.filter {
+            it.kind == com.clarklevis.dsh.shared.projection.ConversationItemKind.ASSISTANT
+        }
+        assertEquals("流式占位应被原地替换而不是残留两条", 1, assistantItems.size)
+        assertEquals(finalText, assistantItems.single().text)
 
         val png = tinyPng()
         transport.receive(

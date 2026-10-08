@@ -1170,6 +1170,62 @@ class GatewayRuntimeIntegrationTest {
         assertTrue(runtime.requestHistory("session-a"))
     }
 
+    /**
+     * 分页游标��须与读取时的 `historyFormatVersion` 成对出现。
+     *
+     * 缺版本时**不得**静默降级成不带游标的请求：那会取回最新一页，而调用方以为翻到了更早的
+     * 历史——表现为「上翻加载更多」原地重复取回同一页、列表不前进却反复转圈，且没有任何
+     * 可诊断的错误码。真实网关同样要求成对（否则回 history-format-mismatch），
+     * 所以客户端应当 fail-closed 并发出一条可被 UI 消费的拒绝事件。
+     */
+    @Test
+    fun historyCursorWithoutFormatVersionIsRejectedInsteadOfSilentlyRefetchingLatest() = runTest {
+        val transport = FakeTransport()
+        val runtime = newRuntime(transport)
+        val events = mutableListOf<GatewayRuntimeEvent>()
+        backgroundScope.launch { runtime.events.collect(events::add) }
+        runCurrent()
+        runtime.connect("wss://gateway.example/ws/mobile")
+        transport.opened()
+        transport.receive("""{"kind":"hello","authenticated":true,"historyFormatVersion":4}""")
+        runCurrent()
+
+        val rejected = runtime.requestHistory("session-a", beforeSequence = 7)
+        assertFalse(rejected, "缺格式版本时必须拒绝而不是发出一条语义错误的请求")
+        runCurrent()
+        assertTrue(
+            events.filterIsInstance<GatewayRuntimeEvent.RequestRejected>().any {
+                it.requestType == "history" &&
+                    it.targetSessionId == "session-a" &&
+                    it.reason == "history-cursor-without-format"
+            }
+        )
+        // 关键：一条 history 请求都不许发出去（降级实现会发出不带 beforeSeq 的那条）。
+        assertTrue(
+            transport.sentPayloads.none { it.contains("\"history\"") },
+            "不得发出任何 history 请求"
+        )
+
+        // 带上版本则正常发出，且两个字段同时出现。
+        assertTrue(runtime.requestHistory("session-a", beforeSequence = 7, historyFormatVersion = 4))
+        runCurrent()
+        val cursorRequest = transport.sentPayloads.last()
+        assertTrue(cursorRequest.contains("\"beforeSeq\":7"))
+        assertTrue(cursorRequest.contains("\"historyFormatVersion\":4"))
+
+        // 首屏（无游标）不需要版本，且不应被带上。history 走 COALESCE_LATEST 车道，
+        // 必须先把上一页应答掉，车道才会空出来接收这一条。
+        transport.receive(
+            """{"kind":"history","sessionId":"session-a","historyFormatVersion":4,"events":[],"hasMore":false}"""
+        )
+        runCurrent()
+        assertTrue(runtime.requestHistory("session-a"))
+        runCurrent()
+        val firstPage = transport.sentPayloads.last()
+        assertFalse(firstPage.contains("beforeSeq"), "首屏请求不该带游标")
+        assertFalse(firstPage.contains("historyFormatVersion"), "首屏请求不该带格式版本")
+    }
+
     @Test
     fun orderedFailureInvalidatesGenerationBeforeLaterBufferedHello() = runTest {
         val transport = FakeTransport()

@@ -16,6 +16,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.clarklevis.dsh.android.AndroidSharedStateHolder
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -34,6 +35,10 @@ class ConversationKeyboardDeviceTest {
 
         compose.onNodeWithTag("composer-input").performClick().assertIsFocused()
         waitForIme(fixture.view, visible = true)
+        // 本轮必须真的被键盘顶起：IME 可见但 inset 为 0（模拟器开了硬件键盘时就是这种）时，
+        // `imePadding()` 自然不会移动任何东西，下面的断言会以「条件超时」这种看不出原因的方式
+        // 失败。这里把这个环境前提显式化，让它以可读的原因失败/跳过，而不是伪装成产品回归。
+        assumeImeOccupiesSpace(fixture.view)
         compose.waitUntil(timeoutMillis = 5_000) {
             latestMessage.fetchSemanticsNode().boundsInRoot.top < messageTopBeforeIme - 100f
         }
@@ -102,6 +107,31 @@ class ConversationKeyboardDeviceTest {
             ViewCompat.getRootWindowInsets(view)
                 ?.isVisible(WindowInsetsCompat.Type.ime()) == visible
         }
+    }
+
+    /**
+     * 断言 IME 真的占了高度（`ime()` inset > 0），否则跳过。
+     *
+     * 模拟器/AOSP 镜像带硬件键盘时（AVD `hw.keyboard=yes`，本仓库默认镜像就是），软键盘
+     * 「可见」但不占高度：`WindowInsets.ime()` 变成 0，`imePadding()` 无位移。
+     * 那种环境下本用例测不出任何东西，却会以 5s 条件超时失败——历史上它正是这样被误记成
+     * 产品回归的（见 `Docs/test-evidence/2026-10-07-ui-redesign/verification.md`）。
+     *
+     * 实测（同机对照）：`hw.keyboard=yes` → ime 可见但 bottom=0、气泡仅移动 58px；
+     * `hw.keyboard=no` → bottom=883、气泡移动 878px。注意只设
+     * `settings put secure show_ime_with_hard_keyboard 1` **不足以**产生 inset，
+     * 必须用不带硬件键盘的 AVD。
+     */
+    private fun assumeImeOccupiesSpace(view: View) {
+        val imeBottom = ViewCompat.getRootWindowInsets(view)
+            ?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
+        assumeTrue(
+            "软键盘可见但不占高度（ime inset=0）：该 AVD 启用了硬件键盘，本用例无法验证 IME 位移。" +
+                "请改用 `hw.keyboard=no` 的 AVD 重跑（关闭模拟器后改 " +
+                "~/.android/avd/<name>.avd/config.ini 的 hw.keyboard，再重启模拟器）。" +
+                "详见 Docs/pre-existing-device-failures-repair.md。",
+            imeBottom > 0
+        )
     }
 
     private data class Fixture(
