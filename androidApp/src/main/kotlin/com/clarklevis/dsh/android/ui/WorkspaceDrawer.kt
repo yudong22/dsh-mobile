@@ -7,7 +7,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -17,7 +16,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,14 +30,11 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -402,8 +397,8 @@ internal fun WorkspaceDrawer(
  * 抽屉内的会话行：参考截图里只有单行标题（字号明显大于区块标题），
  * 运行/未读用左侧小圆点表达，不再显示相对时间以免挤压长标题。
  *
- * 长按弹出菜单可重命名 / 归档——首页任务列表移除后，这里是会话管理
- * （重命名、删除）的唯一入口，不能再退回成纯展示行。
+ * 长按弹出菜单可重命名 / 归档——首页只展示「最近活跃」，完整的会话管理仍以这里为主。
+ * 菜单与对话框由 [SessionRowActions] 提供，与首页的最近会话行共用同一套语义。
  */
 @Composable
 private fun DrawerSessionRow(
@@ -414,21 +409,12 @@ private fun DrawerSessionRow(
     onRename: (String, String) -> Unit,
     onArchive: (String) -> Unit
 ) {
-    var menuVisible by remember { mutableStateOf(false) }
-    var renaming by remember { mutableStateOf(false) }
-    var archiving by remember { mutableStateOf(false) }
-    var title by remember { mutableStateOf(session.title) }
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .combinedClickable(
-                role = Role.Button,
-                onClick = onClick,
-                onLongClick = { menuVisible = true }
-            )
-            .padding(horizontal = 30.dp, vertical = 13.dp)
-            .testTag("drawer-session-${session.id}"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    SessionRowActions(
+        session = session,
+        onClick = onClick,
+        onRename = onRename,
+        onArchive = onArchive,
+        modifier = Modifier.testTag("drawer-session-${session.id}")
     ) {
         if (session.isRunning || session.hasUnread) {
             Box(
@@ -455,40 +441,6 @@ private fun DrawerSessionRow(
                 .background(palette.divider)
         )
     }
-    SessionContextMenu(
-        expanded = menuVisible,
-        onDismissRequest = { menuVisible = false },
-        onRename = {
-            title = session.title
-            menuVisible = false
-            renaming = true
-        },
-        onArchive = {
-            menuVisible = false
-            archiving = true
-        }
-    )
-    if (renaming) AlertDialog(
-        onDismissRequest = { renaming = false },
-        title = { Text("重命名会话") },
-        text = { OutlinedTextField(value = title, onValueChange = { title = it }, singleLine = true) },
-        confirmButton = {
-            TextButton(enabled = title.isNotBlank(), onClick = {
-                onRename(session.id, title)
-                renaming = false
-            }) { Text("保存") }
-        },
-        dismissButton = { TextButton(onClick = { renaming = false }) { Text("取消") } }
-    )
-    if (archiving) AlertDialog(
-        onDismissRequest = { archiving = false },
-        title = { Text("删除会话？") },
-        text = { Text("会话将被归档并从列表隐藏，历史记录会保留。") },
-        confirmButton = {
-            TextButton(onClick = { onArchive(session.id); archiving = false }) { Text("删除") }
-        },
-        dismissButton = { TextButton(onClick = { archiving = false }) { Text("取消") } }
-    )
 }
 
 /** 抽屉里区块标题的文案：`任务 (5)`、`空间 (1)`，与参考截图一致。 */

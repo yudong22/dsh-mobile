@@ -1,6 +1,5 @@
 package com.clarklevis.dsh.android.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,7 +19,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -29,8 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
@@ -59,142 +55,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clarklevis.dsh.android.AndroidSharedStateHolder
 import com.clarklevis.dsh.android.R
-import com.clarklevis.dsh.android.resolveWorkspaceSelection
-import com.clarklevis.dsh.shared.protocol.GatewayWorkspace
 import kotlinx.coroutines.delay
-
-@Composable
-internal fun WorkspaceSelectionMenu(
-    expanded: Boolean,
-    workspaces: List<GatewayWorkspace>,
-    selectedWorkspaceId: String?,
-    onSelect: (String) -> Unit,
-    onAddWorkspace: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    val palette = dshPalette()
-    val foreground = palette.textPrimary
-    val effectiveSelection = resolveWorkspaceSelection(selectedWorkspaceId, workspaces)
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismiss,
-        modifier = Modifier
-            .widthIn(min = 250.dp, max = 330.dp)
-            .testTag("workspace-menu"),
-        offset = DpOffset(14.dp, (-8).dp),
-        shape = RoundedCornerShape(24.dp),
-        containerColor = palette.surface,
-        tonalElevation = 0.dp,
-        shadowElevation = 18.dp,
-        border = BorderStroke(1.dp, palette.cardBorder)
-    ) {
-        WorkspaceMenuItem(
-            title = "未分组",
-            icon = if (effectiveSelection == AndroidSharedStateHolder.UNGROUPED_WORKSPACE_ID) {
-                WorkspaceMenuIcon.Selected
-            } else {
-                WorkspaceMenuIcon.Ungrouped
-            },
-            foreground = foreground,
-            modifier = Modifier.testTag("workspace-ungrouped"),
-            onClick = { onSelect(AndroidSharedStateHolder.UNGROUPED_WORKSPACE_ID) }
-        )
-
-        if (workspaces.isNotEmpty()) {
-            HorizontalDivider(
-                Modifier.padding(horizontal = 16.dp),
-                color = palette.divider
-            )
-        }
-
-        workspaces.forEach { workspace ->
-            WorkspaceMenuItem(
-                title = workspace.title,
-                icon = if (workspace.workspaceId == effectiveSelection) {
-                    WorkspaceMenuIcon.Selected
-                } else {
-                    WorkspaceMenuIcon.Folder
-                },
-                foreground = foreground,
-                onClick = { onSelect(workspace.workspaceId) }
-            )
-        }
-
-        HorizontalDivider(
-            Modifier.padding(horizontal = 16.dp),
-            color = palette.divider
-        )
-        WorkspaceMenuItem(
-            title = "添加工作区",
-            icon = WorkspaceMenuIcon.Add,
-            foreground = foreground,
-            modifier = Modifier.testTag("workspace-add"),
-            onClick = onAddWorkspace
-        )
-    }
-}
-
-private enum class WorkspaceMenuIcon { Selected, Ungrouped, Folder, Add }
-
-@Composable
-private fun WorkspaceMenuItem(
-    title: String,
-    icon: WorkspaceMenuIcon,
-    foreground: Color,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val palette = dshPalette()
-    DropdownMenuItem(
-        text = {
-            Text(
-                title,
-                color = foreground,
-                fontSize = 16.sp,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.Normal,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        },
-        onClick = onClick,
-        modifier = modifier.height(50.dp),
-        leadingIcon = {
-            when (icon) {
-                WorkspaceMenuIcon.Selected -> Box(
-                    Modifier.size(22.dp).background(palette.accent, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        painter = androidx.compose.ui.res.painterResource(R.drawable.ic_menu_check),
-                        contentDescription = null,
-                        modifier = Modifier.size(15.dp),
-                        colorFilter = ColorFilter.tint(palette.surface)
-                    )
-                }
-                WorkspaceMenuIcon.Ungrouped -> MenuVectorIcon(R.drawable.ic_workspace_tray, foreground)
-                WorkspaceMenuIcon.Folder -> MenuVectorIcon(R.drawable.ic_folder_outline, foreground)
-                WorkspaceMenuIcon.Add -> MenuVectorIcon(R.drawable.ic_add, foreground)
-            }
-        },
-        contentPadding = PaddingValues(horizontal = 16.dp)
-    )
-}
-
-@Composable
-private fun MenuVectorIcon(resource: Int, tint: Color) {
-    Image(
-        painter = androidx.compose.ui.res.painterResource(resource),
-        contentDescription = null,
-        modifier = Modifier.size(22.dp),
-        colorFilter = ColorFilter.tint(tint)
-    )
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

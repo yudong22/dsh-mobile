@@ -40,12 +40,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clarklevis.dsh.android.AndroidSharedStateHolder
 import com.clarklevis.dsh.android.R
-import com.clarklevis.dsh.shared.protocol.GatewayWorkspace
 
 /**
  * 「项目」标签：工作区（项目）列表，支持切换与新增。
  *
- * 复用既有的 WorkspaceSelectionMenu 数据源与目录浏览器，不新建状态。
+ * 这是首页之外**唯一**的项目切换入口：首页的项目卡已退化为纯指示（此前它另挂了一个
+ * `WorkspaceSelectionMenu` 下拉，与这里功能重复，v1.8.3 已删除）。
  */
 @Composable
 internal fun ProjectsTabScreen(

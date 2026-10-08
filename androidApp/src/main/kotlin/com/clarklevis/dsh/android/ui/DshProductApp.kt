@@ -16,16 +16,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -46,7 +43,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
@@ -55,10 +51,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.clarklevis.dsh.android.AndroidNotificationSessionRoute
 import com.clarklevis.dsh.android.AndroidSharedStateHolder
@@ -273,8 +267,6 @@ private fun WorkspaceScreen(
 ) {
     var showManualPairing by rememberSaveable { mutableStateOf(false) }
     var showQrScanner by rememberSaveable { mutableStateOf(false) }
-    var showWorkspaceMenu by rememberSaveable { mutableStateOf(false) }
-    var showDirectoryBrowser by rememberSaveable { mutableStateOf(false) }
     var showRuntimeSettings by rememberSaveable { mutableStateOf(false) }
     // 底栏「扫码」展开的认证菜单（扫码 / 手动输入）。原先挂在顶栏，现已下移。
     var showAuthMenu by rememberSaveable { mutableStateOf(false) }
@@ -286,7 +278,8 @@ private fun WorkspaceScreen(
     // 经派生状态读取，而不是直接读 stateHolder.snapshot：后者是单个 mutableStateOf，
     // 任何字段变化（例如只改 conversation 的流式发布）都会让整个首页失效重组。
     val homeSessions = stateHolder.homeSessions
-    // 抽屉的会话列表：随选择的工作区过滤。首页本体的会话列表与搜索框已移除。
+    // 抽屉与首页共用这一份「当前项目」过滤结果（`workspaceScopedSessions`），
+    // 保证两处永远来自同一个投影，不会分叉成两个列表。
     val sessions = remember(homeSessions, workspaces, stateHolder.selectedWorkspaceId) {
         workspaceScopedSessions(
             sessions = homeSessions,
@@ -379,34 +372,30 @@ private fun WorkspaceScreen(
                             onOpenRuntimeSettings = { showRuntimeSettings = true }
                         )
                         Spacer(Modifier.height(20.dp))
-                        Box(Modifier.fillMaxWidth()) {
-                            WorkspaceCard(
-                                workspace = selectedWorkspace,
-                                ungrouped = ungroupedSelected,
-                                ungroupedCount = ungroupedSessionCount,
-                                state = stateHolder.gatewayState,
-                                onClick = { showWorkspaceMenu = true }
-                            )
-                            WorkspaceSelectionMenu(
-                                expanded = showWorkspaceMenu,
-                                workspaces = workspaces,
-                                selectedWorkspaceId = stateHolder.selectedWorkspaceId,
-                                onSelect = { workspaceId ->
-                                    stateHolder.selectWorkspace(workspaceId)
-                                    showWorkspaceMenu = false
-                                },
-                                onAddWorkspace = {
-                                    showWorkspaceMenu = false
-                                    showDirectoryBrowser = true
-                                },
-                                onDismiss = { showWorkspaceMenu = false }
-                            )
-                        }
+                        // 当前项目目录：纯指示，不再挂下拉。切换/新增项目统一走底栏「项目」Tab
+                        // （ProjectsTabScreen 已有目录浏览器入口），避免首页与底栏两处重复入口。
+                        WorkspaceCard(
+                            workspace = selectedWorkspace,
+                            ungrouped = ungroupedSelected,
+                            ungroupedCount = ungroupedSessionCount,
+                            state = stateHolder.gatewayState
+                        )
                         Spacer(Modifier.height(14.dp))
                         DshNewTaskButton(
                             label = "新建会话",
                             onClick = onNewSession,
                             enabled = canStartNewSession
+                        )
+                        Spacer(Modifier.height(22.dp))
+                        // 首页正文：当前项目目录下的最近活跃会话。本区块自行截断，
+                        // 完整列表仍在抽屉「任务」区块里（两者共用同一份 `sessions`）。
+                        HomeRecentSessions(
+                            allSessions = sessions,
+                            connection = stateHolder.gatewayState.connection,
+                            onOpenSession = onOpenSession,
+                            onRenameSession = stateHolder::renameSession,
+                            onArchiveSession = stateHolder::archiveSession,
+                            onShowAll = openDrawer
                         )
                     }
                 }
@@ -460,12 +449,6 @@ private fun WorkspaceScreen(
     if (showManualPairing) {
         ManualGatewayPairingSheet(stateHolder) { showManualPairing = false }
     }
-    if (showDirectoryBrowser) {
-        WorkspaceDirectoryBrowserSheet(
-            stateHolder = stateHolder,
-            onDismiss = { showDirectoryBrowser = false }
-        )
-    }
     if (showRuntimeSettings) {
         RuntimeSettingsSheet(
             stateHolder = stateHolder,
@@ -502,20 +485,25 @@ internal fun DshTonalCircleButton(
     }
 }
 
+/**
+ * 当前项目目录指示卡：目录名 + 路径/未归属会话数 + 连接状态点。
+ *
+ * 不可点击：切换与新增项目都在底栏「项目」Tab（`ProjectsTabScreen`）。
+ * 原先这里挂了 `WorkspaceSelectionMenu` 下拉，与底栏入口功能重复，且点开后会遮住
+ * 下方刚加上的「最近活跃会话」。
+ */
 @Composable
 private fun WorkspaceCard(
     workspace: GatewayWorkspace?,
     ungrouped: Boolean,
     ungroupedCount: Int,
-    state: GatewayRuntimeState,
-    onClick: () -> Unit
+    state: GatewayRuntimeState
 ) {
     val palette = dshPalette()
     Row(
         Modifier.fillMaxWidth()
             .background(palette.surface, RoundedCornerShape(20.dp))
             .border(1.dp, palette.cardBorder, RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 15.dp)
             .testTag("workspace-card"),
         verticalAlignment = Alignment.CenterVertically,
@@ -548,12 +536,6 @@ private fun WorkspaceCard(
             )
         }
         ConnectionDot(state)
-        Image(
-            painter = painterResource(R.drawable.ic_question_chevron_down),
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(palette.textTertiary),
-            modifier = Modifier.size(16.dp)
-        )
     }
 }
 

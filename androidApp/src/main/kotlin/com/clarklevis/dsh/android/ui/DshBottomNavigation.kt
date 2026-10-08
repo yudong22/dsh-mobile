@@ -15,10 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.TextAutoSize
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -26,7 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -36,7 +32,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -77,24 +72,30 @@ internal fun DshBottomTabBar(
     modifier: Modifier = Modifier
 ) {
     val palette = dshPalette()
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(palette.canvas)
-            .navigationBarsPadding()
-            .height(84.dp)
-            .padding(horizontal = 4.dp)
-            .testTag("bottom-tab-bar"),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        DshTab.entries.forEach { tab ->
-            DshTabItem(
-                tab = tab,
-                selected = tab == selected,
-                palette = palette,
-                modifier = Modifier.weight(1f),
-                onClick = { onSelect(tab) }
-            )
+    // 顺序很关键：`navigationBarsPadding()` 必须在 `height()` 之前、且在**外层**应用，
+    // 让 84dp 是「内容高度」，系统导航栏 inset 额外加在下方。
+    //
+    // 反例（曾导致真机上底栏只剩一个标签）：`.navigationBarsPadding().height(84.dp)`
+    // 让 84dp 成为「含 inset 的总高」。真机导航栏 inset 为 20dp（60px @3.0x）时内容区
+    // 只剩 64dp，而 DshTabItem 需要 72dp，于是图标与文字被裁到屏幕外。
+    Box(modifier.fillMaxWidth().background(palette.canvas).navigationBarsPadding()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(84.dp)
+                .padding(horizontal = 4.dp)
+                .testTag("bottom-tab-bar"),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            DshTab.entries.forEach { tab ->
+                DshTabItem(
+                    tab = tab,
+                    selected = tab == selected,
+                    palette = palette,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onSelect(tab) }
+                )
+            }
         }
     }
 }
