@@ -103,6 +103,8 @@ class AndroidSharedStateHolder(
     private var streamingSnapshotPublishJob: Job? = null
     /** 冷启动只从缓存播种一次；避免宿主 sessions 帧到达后被旧缓存覆盖。 */
     private var sessionCacheRestored = false
+    /** 工作区缓存的同类一次性闸门；宿主推过 `workspaces` 帧后不再播种。 */
+    private var workspaceCacheRestored = false
     private var lastPersistedSessionCache: String? = null
     private val attachmentQueue = ArrayDeque<AttachmentRequest>()
     private var activeAttachment: AttachmentRequest? = null
@@ -291,6 +293,14 @@ class AndroidSharedStateHolder(
                                 sessionCacheRestored = true
                                 if (snapshot.sessions.isEmpty()) {
                                     applyRestoredSessionCache(value.sessionsJson)
+                                }
+                            }
+                            // 工作区映射同理：只在宿主还没推过 workspaces 帧时播种，
+                            // 否则会把权威列表覆盖成旧缓存。
+                            if (!workspaceCacheRestored && !value.workspacesJson.isNullOrBlank()) {
+                                workspaceCacheRestored = true
+                                if (snapshot.workspaces.isEmpty()) {
+                                    applyRestoredWorkspaceCache(value.workspacesJson)
                                 }
                             }
                             if (hasReceivedWorkspaces) reconcileWorkspaceSelection()
@@ -663,7 +673,15 @@ class AndroidSharedStateHolder(
                                         defaultConfigurationLoadingKinds =
                                             defaultConfigurationLoadingKinds - event.requestType
                                         clearWorkspaceRequestLoading(event.requestType)
-                                        platformError = "${event.requestType}: ${event.reason}"
+                                        // 传输类拒绝不弹模态错误：通知已被拒并不代表用户做错了什么。
+                                        // 最典型的是「切后台再回前台」——后台会主动关闭 socket
+                                        // （DshAndroidApplication.onStop → applicationDidEnterBackground），
+                                        // 回前台时重连还没完成，而 Compose 的 LaunchedEffect(connection)
+                                        // 已经发出了刷新请求，于是必然收到 `not-connected`。
+                                        // 连接状态本身由顶栏状态点承担（dshConnectionDetailText），
+                                        // 这里再弹一次只是噪声；真正的用户动作失败仍照常提示。
+                                        // 判定与文案见 [RequestRejectionPolicy]。
+                                        applyRequestRejection(event.requestType, event.reason)
                                         if (event.requestType == "history") {
                                             event.targetSessionId?.let {
                                                 historyPagingSessionIds = historyPagingSessionIds - it
@@ -704,12 +722,11 @@ class AndroidSharedStateHolder(
                     }
                 }
                 launch {
+                    // 冷启动自动回连失败**不弹模态错误**：此刻用户没做任何动作，
+                    // 重连会按退避自行重试，打扰只会造成「一开 App 就报错」的观感。
+                    // 失败原因已由 diagnostics 记录，连接状态由顶栏状态点表达。
+                    // 原先这里把原始 code（`stored-connect-failed`）直接当消息显示。
                     runCatching { appGraph.gatewayRuntime.connectStoredIfPaired() }
-                        .onFailure {
-                            withContext(Dispatchers.Main.immediate) {
-                                platformError = "stored-connect-failed"
-                            }
-                        }
                 }
             }
         }
@@ -1591,7 +1608,9 @@ class AndroidSharedStateHolder(
         val target = endpoint.trim()
         appGraph.gatewayScope.launch {
             val failed = runCatching { appGraph.gatewayRuntime.connect(target) }.isFailure
-            if (failed) withContext(Dispatchers.Main.immediate) { platformError = "connect-failed" }
+            if (failed) withContext(Dispatchers.Main.immediate) {
+                platformError = "无法连接：地址不可达或未通过此主机确认。"
+            }
         }
     }
 
@@ -1656,12 +1675,12 @@ class AndroidSharedStateHolder(
                         nextBytes > AndroidImagePreprocessor.MAXIMUM_TOTAL_BYTES ||
                         nextBase64Characters > AndroidImagePreprocessor.MAXIMUM_TOTAL_BASE64_CHARACTERS
                     ) {
-                        platformError = "image-selection-limit-exceeded"
+                        platformError = "图片超出数量或大小限制，请减少后重试。"
                     } else {
                         preparedImages = preparedImages + image
                     }
                 }
-                .onFailure { platformError = "image-preprocess-failed" }
+                .onFailure { platformError = "图片读取失败，请重新选择。" }
         }
     }
 
@@ -2119,6 +2138,45 @@ class AndroidSharedStateHolder(
         }
     }
 
+    /**
+     * 冷启动/离线从平台缓存播种工作区映射。
+     *
+     * 复用会话缓存同一条「非网络基线」语义：只填列表、不发 effect。
+     * 调用点必须先确认 `!hasReceivedWorkspaces`——宿主推过真实 `workspaces` 帧之后
+     * 就再也不能用缓存覆盖它。
+     *
+     * 为什么需要这一步：`workspaces` 为空时 `workspaceScopedSessions` 会把所有会话
+     * 判为「未归属」，用户看到的是**错误分组**而非空列表，很容易被当成真的。
+     */
+    private fun applyRestoredWorkspaceCache(workspacesJson: String?) {
+        val appGraph = graph ?: return
+        if (workspacesJson.isNullOrBlank()) return
+        if (hasReceivedWorkspaces) return
+        appGraph.gatewayScope.launch {
+            val restored = runCatching { projectionActor.restoreWorkspaceCache(workspacesJson) }
+                .getOrNull() ?: return@launch
+            withContext(Dispatchers.Main.immediate) {
+                // 从 launch 到现在宿主可能已经推过 workspaces 帧，必须再查一次，
+                // 否则这条异步恢复会覆盖更新的权威数据。
+                if (!hasReceivedWorkspaces) publishSnapshot(restored)
+            }
+        }
+    }
+
+    /**
+     * 把当前工作区映射写入平台偏好，供下次冷启动播种。
+     * 只在宿主确实推过 `workspaces` 帧之后写，避免把空列表当成「真实状态」缓存下来。
+     */
+    private fun persistWorkspaceCache() {
+        val appGraph = graph ?: return
+        appGraph.gatewayScope.launch {
+            val encoded = runCatching { projectionActor.exportWorkspaceCache() }.getOrNull() ?: return@launch
+            runCatching {
+                appGraph.preferences.update(appGraph.preferences.load().copy(workspacesJson = encoded))
+            }
+        }
+    }
+
     private fun handleWorkspaceFrame(frame: GatewayFrame) {
         when (frame.kind) {
             "workspaces" -> {
@@ -2127,6 +2185,8 @@ class AndroidSharedStateHolder(
                     snapshot.workspaces.any { it.workspaceId == created.workspaceId }
                 }
                 if (workspacePreferenceLoaded) reconcileWorkspaceSelection()
+                // 宿主数据即权威：推来即落盘，作为下次冷启动/离线的种子。
+                persistWorkspaceCache()
             }
             "directories" -> {
                 directoryIsLoading = false
@@ -2261,6 +2321,18 @@ class AndroidSharedStateHolder(
         "download-busy" -> "已有文件正在下载，请稍后再试。"
         "file-download-offset-mismatch" -> "文件分块顺序异常，下载已取消。"
         else -> "工作区文件请求失败：$code"
+    }
+
+    /**
+     * 把「请求被拒」翻译成用户可读文案。
+     *
+     * 此前的实现直接把 `"${requestType}: ${reason}"` 当消息显示，用户会看到
+     * `history: gateway-request-failed` 这类内部 token（甚至 `stored-connect-failed`）。
+     * 判定与文案集中在 [RequestRejectionPolicy]，便于单测。
+     */
+    private fun applyRequestRejection(requestType: String, reason: String) {
+        if (RequestRejectionPolicy.isTransient(reason)) return
+        platformError = RequestRejectionPolicy.message(requestType, reason)
     }
 
     private fun applyWorkspaceSelection(workspaceId: String, persist: Boolean) {

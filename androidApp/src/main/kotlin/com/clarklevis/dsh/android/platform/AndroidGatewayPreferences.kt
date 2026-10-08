@@ -34,6 +34,7 @@ class AndroidGatewayPreferences(context: Context, gatewayId: String? = null) : G
             preferences[ENDPOINT] = snapshot.endpoint
             snapshot.selectedWorkspaceId.setOrRemove(preferences, SELECTED_WORKSPACE_ID)
             snapshot.sessionsJson.setOrRemove(preferences, SESSIONS_JSON)
+            snapshot.workspacesJson.setOrRemove(preferences, WORKSPACES_JSON)
         }
     }
 
@@ -41,7 +42,8 @@ class AndroidGatewayPreferences(context: Context, gatewayId: String? = null) : G
         GatewayPreferencesSnapshot(
             endpoint = preferences[ENDPOINT] ?: DEFAULT_ENDPOINT,
             selectedWorkspaceId = preferences[SELECTED_WORKSPACE_ID],
-            sessionsJson = preferences[SESSIONS_JSON]
+            sessionsJson = preferences[SESSIONS_JSON],
+            workspacesJson = preferences[WORKSPACES_JSON]
         )
 
     private fun String?.setOrRemove(
@@ -58,5 +60,11 @@ class AndroidGatewayPreferences(context: Context, gatewayId: String? = null) : G
         private val ENDPOINT = stringPreferencesKey("gateway.endpoint")
         private val SELECTED_WORKSPACE_ID = stringPreferencesKey("gateway.selected_workspace_id")
         private val SESSIONS_JSON = stringPreferencesKey("gateway.sessions_json")
+
+        /**
+         * 工作区映射缓存。与 [SESSIONS_JSON] 分开存放：会话列表随会话活动变化，
+         * 工作区只在宿主推 `workspaces` 帧时变，混在一份会让两者的写入时机互相牵制。
+         */
+        private val WORKSPACES_JSON = stringPreferencesKey("gateway.workspaces_json")
     }
 }

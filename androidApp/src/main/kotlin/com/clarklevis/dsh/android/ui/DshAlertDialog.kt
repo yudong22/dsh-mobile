@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.sp
  * 应用统一的确认弹窗，视觉与设置页保持一致。
  *
  * [content] 用于承载输入框等额外内容；按钮为空时不会渲染按钮区域。
+ * [confirmDestructive] 把确认按钮渲染为错误色——用于删除一类不可撤销的操作，
+ * 避免用主色实心把破坏性动作暗示成推荐的常规操作。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,6 +44,7 @@ internal fun DshAlertDialog(
     confirmLabel: String? = null,
     onConfirm: (() -> Unit)? = null,
     confirmEnabled: Boolean = true,
+    confirmDestructive: Boolean = false,
     content: (@Composable ColumnScope.() -> Unit)? = null
 ) {
     BasicAlertDialog(onDismissRequest = onDismissRequest) {
@@ -83,6 +86,9 @@ internal fun DshAlertDialog(
                                 label = label,
                                 modifier = if (dismissLabel == null) Modifier.fillMaxWidth() else Modifier.weight(1f),
                                 enabled = confirmEnabled,
+                                // 确认动作是对话框的主操作，用实心与「取消/好」区分开。
+                                primary = true,
+                                destructive = confirmDestructive,
                                 onClick = onConfirm ?: onDismissRequest
                             )
                         }
@@ -98,9 +104,20 @@ private fun DshAlertDialogButton(
     label: String,
     modifier: Modifier,
     enabled: Boolean = true,
+    primary: Boolean = false,
+    destructive: Boolean = false,
     onClick: () -> Unit
 ) {
-    val buttonColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.08f else 0.04f)
+    // 主次分级：此前两个按钮都取 onSurface 8% 底，视觉上完全一样，
+    // 用户看不出「好」与「重新连接」的区别。主按钮改为实心填充：
+    // 破坏性操作用错误色，其余用主题主色。
+    val colorScheme = MaterialTheme.colorScheme
+    val buttonColor = when {
+        !enabled -> colorScheme.onSurface.copy(alpha = 0.04f)
+        destructive -> colorScheme.error
+        primary -> colorScheme.primary
+        else -> colorScheme.onSurface.copy(alpha = 0.08f)
+    }
     Box(
         modifier = modifier
             .height(48.dp)
@@ -111,7 +128,11 @@ private fun DshAlertDialogButton(
     ) {
         Text(
             text = label,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f),
+            color = when {
+                !enabled -> colorScheme.onSurface.copy(alpha = 0.38f)
+                destructive || primary -> colorScheme.onPrimary
+                else -> colorScheme.onSurface.copy(alpha = 1f)
+            },
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold
         )

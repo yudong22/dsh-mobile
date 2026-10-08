@@ -724,6 +724,41 @@ class AndroidGatewayProjectionTest {
         replaceRegression.close()
     }
 
+    /**
+     * 工作区缓存的导出/恢复（v1.8.3 遗留项）：冷启动离线时分组必须仍然正确。
+     *
+     * 这是点 4 的核心断言——`workspaces` 为空会让**所有**会话落进「未归属」，
+     * 得到的是错误分组而不是空列表。
+     */
+    @Test
+    fun workspaceCacheRoundTripsThroughTheProjection() {
+        val raw =
+            """{"kind":"workspaces","items":[{"workspaceId":"w1","path":"/one","title":"One","sessionIds":["s1"],"createdAt":"","updatedAt":""}],"archivedSessionIds":[]}"""
+        val projection = AndroidGatewayProjection()
+        projection.acceptFrame(raw, GatewayWireDecoder.decode(raw), null)
+        val cached = projection.exportWorkspaceCache()
+        projection.close()
+
+        // 冷启动：新投影、内存为空，用缓存播种。
+        val cold = AndroidGatewayProjection()
+        assertTrue(cold.snapshot().workspaces.isEmpty())
+        val restored = cold.restoreWorkspaceCache(cached)
+
+        val workspace = restored.workspaces.single()
+        assertEquals("w1", workspace.workspaceId)
+        // sessionIds 是分组依据，丢了它会话仍然进不了项目。
+        assertEquals(listOf("s1"), workspace.sessionIds)
+        cold.close()
+    }
+
+    /** 损坏的工作区缓存必须安全降级，不能打断冷启动。 */
+    @Test
+    fun corruptWorkspaceCacheDoesNotBreakColdStart() {
+        val projection = AndroidGatewayProjection()
+        assertTrue(projection.restoreWorkspaceCache("not-json").workspaces.isEmpty())
+        projection.close()
+    }
+
     private fun event(
         sequence: Long,
         transaction: String,

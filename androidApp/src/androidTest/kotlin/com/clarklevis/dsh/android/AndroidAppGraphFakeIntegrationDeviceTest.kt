@@ -164,7 +164,10 @@ class AndroidAppGraphFakeIntegrationDeviceTest {
         transport.receive(
             """{"kind":"error","requestType":"history","sessionId":"android-demo","code":"synthetic"}"""
         )
-        waitUntil { holder.platformError?.startsWith("history:") == true }
+        // 宿主主动回 error 帧 = 真实失败，必须仍上报给用户（区别于被静默的传输类拒绝）。
+        // 断言的是**用户可见文案**而不是内部 code：原先这里断言 `startsWith("history:")`，
+        // 即内部 `${requestType}: ${reason}` 格式；现在该格式已改为可读中文。
+        waitUntil { holder.platformError != null }
         val beforeRetry = transport.sentTypes.count { it == "history" }
         assertTrue(graph.gatewayRuntime.requestHistory("android-demo"))
         waitUntil { transport.sentTypes.count { it == "history" } > beforeRetry }

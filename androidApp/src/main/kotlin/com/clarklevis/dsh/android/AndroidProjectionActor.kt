@@ -242,6 +242,16 @@ internal class AndroidProjectionActor(
             projection.restoreSessionCache(sessionsJson)
         }
 
+    /** 工作区映射缓存的导出/恢复入口，理由同 [exportSessionCache]。 */
+    suspend fun exportWorkspaceCache(): String = mutationLock.withLock {
+        projection.exportWorkspaceCache()
+    }
+
+    suspend fun restoreWorkspaceCache(workspacesJson: String): SharedMobileSnapshot =
+        mutationLock.withLock {
+            projection.restoreWorkspaceCache(workspacesJson)
+        }
+
     /**
      * 该会话是否已有不得被磁盘缓存覆盖的权威内容。必须在 `mutationLock` 内读取：
      * 投影状态由后台 gateway dispatcher 写入，绕过锁会读到撕裂状态。

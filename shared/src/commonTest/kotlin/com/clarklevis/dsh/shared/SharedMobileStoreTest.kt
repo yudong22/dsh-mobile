@@ -289,4 +289,76 @@ class SharedMobileStoreTest {
         )
         assertNull(snapshot.goalSnapshot?.goal)
     }
+
+    /**
+     * 工作区映射必须能落盘并播种（v1.8.3 遗留项）：否则冷启动/离线时
+     * `availableWorkspaces` 为空，所有会话被判为「未归属」——那是**错误分组**
+     * 而不是空列表，用户很容易当真。
+     */
+    @Test
+    fun workspaceCacheRoundTripsForOfflineGrouping() {
+        val store = SharedMobileStore()
+        store.acceptFrame(
+            """{"kind":"workspaces","items":[{"workspaceId":"w1","path":"/one","title":"One","sessionIds":["s1"],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z"}],"archivedSessionIds":[]}"""
+        )
+        assertEquals(listOf("w1"), store.snapshot().workspaces.map { it.workspaceId })
+
+        val cache = store.exportWorkspaceCache()
+
+        // 新进程：内存为空，用缓存播种。
+        val cold = SharedMobileStore()
+        assertTrue(cold.snapshot().workspaces.isEmpty())
+        val restored = cold.restoreWorkspaces(cache)
+
+        val workspace = restored.workspaces.single()
+        assertEquals("w1", workspace.workspaceId)
+        assertEquals("/one", workspace.path)
+        assertEquals("One", workspace.title)
+        // sessionIds 是分组依据，必须一起还原，否则会话仍然落不进项目。
+        assertEquals(listOf("s1"), workspace.sessionIds)
+        assertEquals("2026-01-01T00:00:00Z", workspace.createdAt)
+        assertEquals("2026-01-02T00:00:00Z", workspace.updatedAt)
+    }
+
+    /** 空/损坏的工作区缓存必须安全降级为空列表，不能抛异常打断冷启动。 */
+    @Test
+    fun workspaceCacheRestoreToleratesMissingOrCorruptPayload() {
+        val store = SharedMobileStore()
+        assertTrue(store.restoreWorkspaces(null).workspaces.isEmpty())
+        assertTrue(store.restoreWorkspaces("").workspaces.isEmpty())
+        assertTrue(store.restoreWorkspaces("not-json").workspaces.isEmpty())
+    }
+
+    /** 宿主 workspaces 帧必须覆盖缓存（已删除的项目不得残留）。 */
+    @Test
+    fun remoteWorkspacesFrameReplacesCachedList() {
+        val store = SharedMobileStore()
+        store.restoreWorkspaces(
+            """{"schema":1,"workspaces":[{"workspaceId":"gone","path":"/gone","title":"Gone","sessionIds":[]}]}"""
+        )
+        assertEquals(listOf("gone"), store.snapshot().workspaces.map { it.workspaceId })
+
+        val snapshot = store.acceptFrame(
+            """{"kind":"workspaces","items":[{"workspaceId":"kept","path":"/kept","title":"Kept","sessionIds":[],"createdAt":"","updatedAt":""}],"archivedSessionIds":[]}"""
+        )
+        assertEquals(listOf("kept"), snapshot.workspaces.map { it.workspaceId })
+    }
+
+    /** 工作区缓存与会话缓存互不干扰：各自独立落盘与恢复。 */
+    @Test
+    fun workspaceAndSessionCachesAreIndependent() {
+        val store = SharedMobileStore()
+        store.acceptFrame(
+            """{"kind":"sessions","items":[{"sessionId":"s1","updatedAt":1800000000,"running":false,"blank":false}]}"""
+        )
+        store.acceptFrame(
+            """{"kind":"workspaces","items":[{"workspaceId":"w1","path":"/one","title":"One","sessionIds":["s1"],"createdAt":"","updatedAt":""}],"archivedSessionIds":[]}"""
+        )
+
+        // 只恢复工作区：会话列表必须仍为空（证明两份缓存没有耦合）。
+        val cold = SharedMobileStore()
+        val onlyWorkspaces = cold.restoreWorkspaces(store.exportWorkspaceCache())
+        assertEquals(listOf("w1"), onlyWorkspaces.workspaces.map { it.workspaceId })
+        assertTrue(onlyWorkspaces.sessions.isEmpty())
+    }
 }

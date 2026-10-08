@@ -172,12 +172,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun ConversationScreen(
     stateHolder: AndroidSharedStateHolder,
     onPickImage: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    // 任务详情页左上角是抽屉钮（而不是返回）：抽屉里可以直接切换任务，
+    // 比「先返回列表再进另一个任务」少一步。有默认值是因为两个设备测试
+    // 直接挂载本组件（ConversationKeyboardDeviceTest / ConversationHistoryRecoveryDeviceTest），
+    // 它们不关心抽屉。
+    onOpenDrawer: () -> Unit = {}
 ) {
     val palette = dshPalette()
     val session = stateHolder.snapshot.sessions.firstOrNull { it.id == stateHolder.snapshot.selectedSessionId }
@@ -227,15 +232,19 @@ internal fun ConversationScreen(
                     )
                 },
                 navigationIcon = {
-                    TopBarCircleButton(
-                        iconRes = R.drawable.ic_back_chevron,
-                        description = "返回",
-                        onClick = {
-                            dismissInput()
-                            onBack()
-                        },
-                        modifier = Modifier.padding(start = 8.dp, end = 14.dp)
-                    )
+                    // 左上角是**抽屉钮**而不是返回键：任务详情是核心页面，
+                    // 抽屉里能直接切到别的任务（比返回列表再选更快）。
+                    // 返回仍可用系统返回手势/按键（见本函数开头的 BackHandler 语义）。
+                    Box(Modifier.padding(start = 8.dp, end = 14.dp)) {
+                        DshDrawerButton(
+                            onClick = {
+                                dismissInput()
+                                onOpenDrawer()
+                            },
+                            size = 40.dp,
+                            testTag = "conversation-drawer-button"
+                        )
+                    }
                 },
                 actions = {
                     Row(
@@ -919,6 +928,10 @@ private fun ConversationTimeline(
                 .fillMaxSize()
                 .imePadding()
                 .padding(horizontal = 20.dp)
+                // 滚动容器的独立锚点：外层 Box 也叫 conversation-timeline，但语义树里
+                // 带滚动动作的是这个 LazyColumn。设备测试要「确定性地滚到某条消息」
+                // 必须落在真正可滚动的节点上（见 ConversationKeyboardDeviceTest）。
+                .testTag("conversation-timeline-list")
                 .alpha(if (hasInitialContent && !initialPositionApplied) 0f else 1f),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                 top = 8.dp,

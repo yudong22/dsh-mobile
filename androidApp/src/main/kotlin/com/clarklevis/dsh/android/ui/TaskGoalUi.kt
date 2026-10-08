@@ -108,6 +108,7 @@ internal fun TaskGoalPanels(
                         dismissLabel = "取消",
                         onDismissClick = { confirmGoalClear = false },
                         confirmLabel = "删除",
+                        confirmDestructive = true,
                         onConfirm = {
                             confirmGoalClear = false
                             stateHolder.clearGoal()

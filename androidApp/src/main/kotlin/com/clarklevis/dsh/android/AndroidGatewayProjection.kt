@@ -148,6 +148,20 @@ internal class AndroidGatewayProjection(
         return snapshot()
     }
 
+    /** 导出工作区映射缓存；平台层负责实际磁盘 I/O。 */
+    fun exportWorkspaceCache(): String = mobileStore.exportWorkspaceCache()
+
+    /**
+     * 用缓存的工作区播种（冷启动/离线）。
+     *
+     * **只填列表、不发 effect**，且调用方必须先用 `hasReceivedWorkspaces` 之类的守卫
+     * 确认宿主还没推过 `workspaces` 帧——否则会用旧缓存覆盖权威数据。
+     */
+    fun restoreWorkspaceCache(workspacesJson: String): SharedMobileSnapshot {
+        controlSnapshot = mobileStore.restoreWorkspaces(workspacesJson)
+        return snapshot()
+    }
+
     /**
      * 导出该会话的规范化事件基线供平台落盘。只在已有基线时导出；空列表返回 null，
      * 避免用空缓存覆盖掉磁盘上仍可用的历史。

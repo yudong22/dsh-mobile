@@ -117,7 +117,8 @@ internal fun WorkspaceDrawer(
         val progress = (offsetPx / drawerWidthPx).coerceIn(0f, 1f)
         // 两个区块各自可折叠，与标题上的箭头语义一致。
         var tasksExpanded by remember { mutableStateOf(true) }
-        var spacesExpanded by remember { mutableStateOf(true) }
+        // 「项目」是次级导航，默认收起：展开它会挤掉任务列表的可视高度。
+        var spacesExpanded by remember { mutableStateOf(false) }
 
         fun settle(open: Boolean, velocity: Float = 0f) {
             animationJob?.cancel()
@@ -230,7 +231,13 @@ internal fun WorkspaceDrawer(
 
                 DshNewTaskButton(
                     label = "新建任务",
-                    onClick = onNewSession,
+                    onClick = {
+                        // 抽屉已从首页提升到应用外壳（v1.9.0 点 5），因此它不再随
+                        // 页面销毁而关闭：任何会跳转/改变主区内容的动作都必须自己收起，
+                        // 否则抽屉会半开着盖住目标页面。
+                        settle(open = false)
+                        onNewSession()
+                    },
                     // 未连接时新建会直接失败（prepareNewSession 会拒绝），
                     // 这里先置灰，避免用户点了才看到报错。
                     enabled = !connection.dshBlocksNetworkActions,
@@ -289,17 +296,23 @@ internal fun WorkspaceDrawer(
                                     session = session,
                                     palette = palette,
                                     isLast = index == sessions.lastIndex,
-                                    onClick = { onOpenSession(session.id) },
+                                    onClick = {
+                                        // 切换任务后必须收起抽屉：抽屉在会话页也能打开
+                                        // （点 5），若不收起会半开着盖住刚切过去的任务详情。
+                                        settle(open = false)
+                                        onOpenSession(session.id)
+                                    },
                                     onRename = onRenameSession,
                                     onArchive = onArchiveSession
                                 )
                             }
                         }
                     }
-                    // 空间区块：与「任务」并列的第二组，对应截图的「空间 (n)」。
+                    // 项目区块：与「任务」并列的第二组。默认**收起**——它是次级导航，
+                    // 展开会挤占任务列表的可视高度（任务列表才是这一屏的主体）。
                     item {
                         DrawerSectionHeader(
-                            label = "空间",
+                            label = "项目",
                             count = spaces.size + 1,
                             expanded = spacesExpanded,
                             onToggle = { spacesExpanded = !spacesExpanded },
@@ -333,7 +346,13 @@ internal fun WorkspaceDrawer(
                 // 次级入口放在滚动列表「之外」：它们原先在列表末尾，会话一多就被顶出屏幕，
                 // 必须滚动才能看到（实测在模拟器上 插件 不可见）。这里是固定可达区域。
                 // 定时任务已下移到主底栏，抽屉不再重复入口。
-                DrawerItem("插件", R.drawable.ic_drawer_plugin, "drawer-plugins", palette, onPlugins)
+                //
+                // 点它会离开当前页面，所以必须先收起抽屉（提升到应用外壳后抽屉不再
+                // 随页面销毁）。
+                DrawerItem("插件", R.drawable.ic_drawer_plugin, "drawer-plugins", palette) {
+                    settle(open = false)
+                    onPlugins()
+                }
 
                 Box(Modifier.fillMaxWidth().height(1.dp).background(palette.divider))
                 DshAccountCard(

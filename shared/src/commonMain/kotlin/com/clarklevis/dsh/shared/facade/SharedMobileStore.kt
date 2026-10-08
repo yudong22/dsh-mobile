@@ -67,6 +67,36 @@ data class SharedSessionCacheEntry(
     val hasConversation: Boolean? = null
 )
 
+/**
+ * 工作区映射的平台落盘形态。
+ *
+ * 单独一份而不是塞进 [SharedSessionCacheSnapshot]：两者更新时机不同——
+ * 会话列表随会话活动变化，工作区只在宿主推 `workspaces` 帧时变，
+ * 分开可避免「工作区没变也要重写整份会话缓存」。
+ *
+ * 缺了它会怎样：冷启动/离线时 `availableWorkspaces` 为空，
+ * `workspaceScopedSessions` 会把**所有**会话判为「未归属」——
+ * 用户看到的是错误分组而不是空列表，因此更容易被当真。
+ */
+@Serializable
+data class SharedWorkspaceCacheSnapshot(
+    val schema: Int = 1,
+    val workspaces: List<SharedWorkspaceCacheEntry> = emptyList()
+)
+
+/** 工作区的平台落盘条目，字段与 `GatewayWorkspace` 一一对应。 */
+@Serializable
+data class SharedWorkspaceCacheEntry(
+    val workspaceId: String,
+    val path: String,
+    val title: String,
+    val sessionIds: List<String> = emptyList(),
+    /** 与 `GatewayWorkspace.createdAt` 一致：非空字符串（宿主未提供时为 ""）。 */
+    val createdAt: String = "",
+    /** 与 `GatewayWorkspace.updatedAt` 一致：非空字符串（宿主未提供时为 ""）。 */
+    val updatedAt: String = ""
+)
+
 data class SharedMobileSnapshot(
     val sessions: List<SessionSummary> = emptyList(),
     val workspaces: List<GatewayWorkspace> = emptyList(),
@@ -615,6 +645,51 @@ class SharedMobileStore(
         return makeSnapshot()
     }
 
+    /**
+     * 导出工作区映射，供平台层落盘。
+     *
+     * 与 [exportSessionCache] 分开：工作区只在宿主推 `workspaces` 帧时变化，
+     * 没必要跟着每次会话活动一起重写。
+     */
+    fun exportWorkspaceCache(): String = wireJson.encodeToString(
+        SharedWorkspaceCacheSnapshot(
+            workspaces = workspaces.map { workspace ->
+                SharedWorkspaceCacheEntry(
+                    workspaceId = workspace.workspaceId,
+                    path = workspace.path,
+                    title = workspace.title,
+                    sessionIds = workspace.sessionIds.toList(),
+                    createdAt = workspace.createdAt,
+                    updatedAt = workspace.updatedAt
+                )
+            }
+        )
+    )
+
+    /**
+     * 用缓存的工作区作为冷启动/离线的种子。这是**非网络基线**：只填列表，
+     * 不发任何 effect；连接建立后由宿主的 `workspaces` 帧按全量替换语义覆盖。
+     *
+     * 调用方必须自行保证「宿主已经推过 workspaces 帧就不再恢复」——
+     * 那属于权威内容守卫，见 `AndroidSharedStateHolder` 的 `hasReceivedWorkspaces`。
+     */
+    fun restoreWorkspaces(snapshotJson: String?): SharedMobileSnapshot {
+        if (snapshotJson.isNullOrBlank()) return makeSnapshot()
+        val restored = runCatching {
+            wireJson.decodeFromString<SharedWorkspaceCacheSnapshot>(snapshotJson)
+        }.getOrNull() ?: return makeSnapshot()
+        workspaces = restored.workspaces.map { entry ->
+            GatewayWorkspace(
+                workspaceId = entry.workspaceId,
+                path = entry.path,
+                title = entry.title,
+                sessionIds = entry.sessionIds,
+                createdAt = entry.createdAt,
+                updatedAt = entry.updatedAt
+            )
+        }
+        return makeSnapshot()
+    }
     fun reset(): SharedMobileSnapshot {
         sessionListState = SessionListState()
         questionState = QuestionState()

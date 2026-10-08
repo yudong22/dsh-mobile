@@ -1,13 +1,17 @@
 package com.clarklevis.dsh.android
 
 import android.view.WindowManager
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
@@ -42,7 +46,11 @@ class AndroidUiParityDeviceTest {
         // homeListsRecentSessionsForTheCurrentWorkspace。
         compose.onNode(hasTestTag("workspace-hero-title")).assertDoesNotExist()
         compose.onNode(hasTestTag("workspace-session-search")).assertDoesNotExist()
-        compose.onNode(hasText("新建会话")).assertIsDisplayed()
+        // 文案统一为「任务」（v1.9.0）：首页按钮与抽屉同名按钮此前叫法不一致
+        // （「新建会话」vs「新建任务」）。抽屉关闭时会 clearAndSetSemantics，
+        // 因此这里只会命中首页那一个。
+        compose.onNode(hasTestTag("new-task-button")).assertIsDisplayed()
+        compose.onNode(hasText("新建任务")).assertIsDisplayed()
         // 项目卡已退化为**纯指示**：断言它没有点击动作，而不是「点一下再断言菜单不存在」——
         // 后者在卡片仍可点但菜单坏掉时也会通过，等于测不出这条退化。
         compose.onNode(hasTestTag("workspace-card")).assertIsDisplayed().assertHasNoClickAction()
@@ -58,11 +66,17 @@ class AndroidUiParityDeviceTest {
         compose.onNode(hasTestTag("brand-runtime-settings-button")).assertIsDisplayed()
         compose.onNode(hasContentDescription("设备认证", substring = true)).assertDoesNotExist()
         // 切换与新增项目的落点：底栏「项目」Tab（首页项目卡已不再承担该职责）。
-        // 注意「项目」是独立页面、不带底栏，断言完必须返回首页才能继续点底栏 Tab。
         compose.onNode(hasTestTag("tab-projects")).performClick()
         compose.onNode(hasTestTag("projects-list")).assertIsDisplayed()
         compose.onNode(hasText("未分组", substring = true)).assertIsDisplayed()
         compose.onNode(hasContentDescription("添加项目")).assertIsDisplayed()
+        // 选中某个项目后应**自动回到任务列表**（「点项目」的意图是去看它的任务）。
+        // 这里点「未分组」行，断言回到了首页而不是停在项目页。
+        compose.onNode(hasTestTag("project-card-ungrouped")).performClick()
+        compose.onNode(hasTestTag("workspace-card")).assertIsDisplayed()
+        compose.onNode(hasTestTag("bottom-tab-bar")).assertIsDisplayed()
+        // 再验证一次「返回」路径仍然可用（用于「添加项目」等不选中即离开的流程）。
+        compose.onNode(hasTestTag("tab-projects")).performClick()
         compose.onNode(hasContentDescription("返回")).performClick()
         compose.onNode(hasTestTag("bottom-tab-bar")).assertIsDisplayed()
         compose.onNode(hasTestTag("tab-settings")).performClick()
@@ -70,7 +84,7 @@ class AndroidUiParityDeviceTest {
     }
 
     /**
-     * 未连接时「新建会话」必须置灰而不是可点后报错。
+     * 未连接时「新建任务」必须置灰而不是可点后报错。
      *
      * 此前的版本叫 `offlineNewSessionOpensComposer...`，期望未连接也能打开输入框；
      * 但 `prepareNewSession()` 一直要求 CONNECTED，两者矛盾导致该测试长期失败。
@@ -113,7 +127,8 @@ class AndroidUiParityDeviceTest {
      *
      * 注意 `hasText` 默认是**精确匹配**，而该区块渲染的是 `任务 (0)` 这种带计数的文案，
      * 所以这里必须断言 testTag（或带 substring = true），不能写成 `hasText("任务")`——
-     * 那样只会命中底栏的同名 Tab，删掉整个区块测试也照样通过。
+     * 那样只会命中别的节点，删掉整个区块测试也照样通过。
+     * （底栏 Tab 自 v1.9.0 起已改名为「任务列表」，不再是同名干扰源。）
      */
     @Test
     fun drawerTaskSectionHostsTheSessionList() {
@@ -127,16 +142,62 @@ class AndroidUiParityDeviceTest {
 
     /**
      * 定时任务已从抽屉下移到主底栏，因此入口改为底栏 Tab。
+     *
+     * v1.9.0（点 6）起该页面**自己也有底栏**，所以到达后底栏必须仍在，
+     * 且「定时任务」为选中态——否则「核心页面保留完整切换导航」就没落实。
      */
     @Test
-    fun bottomBarSchedulesTabOpensScheduledTasks() {
+    fun bottomBarSchedulesTabOpensScheduledTasksAndKeepsTheBar() {
         compose.onNode(hasTestTag("tab-schedules")).assertIsDisplayed().performClick()
         compose.onNode(hasTestTag("scheduled-tasks-screen")).assertIsDisplayed()
-        compose.onNode(hasText("定时任务")).assertIsDisplayed()
+        // 「定时任务」在页标题与底栏 Tab 上各出现一次（底栏是 v1.9.0 新增的），
+        // 因此这里断言 Tag 而不是文本，避免 multiple-nodes 的脆弱失败。
+        compose.onNode(hasTestTag("bottom-tab-bar")).assertIsDisplayed()
+        compose.onNode(hasTestTag("tab-schedules")).assertIsSelected()
+        compose.onNode(hasTestTag("tab-tasks")).assertIsNotSelected()
     }
 
     /**
-     * 底栏构成：任务 / 项目 / 定时任务 / 设置 / 扫码。
+     * 底栏在每个核心页面上都要存在，且选中项对应当前页面（点 6）。
+     *
+     * 用 `onAllNodes`：底栏现在可能同时只有一个，但断言用复数形式可以避免
+     * 「改天不小心组合出两个底栏」时抛 multiple-nodes 的脆弱失败。
+     */
+    @Test
+    fun bottomBarIsPresentOnEveryCorePageWithCorrectSelection() {
+        // 首页 → 任务列表
+        compose.onAllNodesWithTag("bottom-tab-bar").assertCountEquals(1)
+        compose.onNode(hasTestTag("tab-tasks")).assertIsSelected()
+
+        // 项目
+        compose.onNode(hasTestTag("tab-projects")).performClick()
+        compose.onAllNodesWithTag("bottom-tab-bar").assertCountEquals(1)
+        compose.onNode(hasTestTag("tab-projects")).assertIsSelected()
+
+        // 设置
+        compose.onNode(hasTestTag("tab-settings")).performClick()
+        compose.onAllNodesWithTag("bottom-tab-bar").assertCountEquals(1)
+        compose.onNode(hasTestTag("tab-settings")).assertIsSelected()
+
+        // 回到任务列表
+        compose.onNode(hasTestTag("tab-tasks")).performClick()
+        compose.onAllNodesWithTag("bottom-tab-bar").assertCountEquals(1)
+        compose.onNode(hasTestTag("tab-tasks")).assertIsSelected()
+    }
+
+    /**
+     * 二级下钻页**不**显示底栏：插件页不是目的地，挂底栏会让人以为它是平级页面。
+     */
+    @Test
+    fun drawerOnlyDestinationHidesTheBottomBar() {
+        compose.onNode(hasContentDescription("打开侧边栏")).performClick()
+        compose.onNode(hasTestTag("drawer-plugins")).performClick()
+        compose.onNode(hasText("插件功能尚未接入")).assertIsDisplayed()
+        compose.onAllNodesWithTag("bottom-tab-bar").assertCountEquals(0)
+    }
+
+    /**
+     * 底栏构成：任务列表 / 项目 / 定时任务 / 设置 / 扫码。
      * 「专家」「资料库」必须不再出现，避免回归。
      */
     @Test

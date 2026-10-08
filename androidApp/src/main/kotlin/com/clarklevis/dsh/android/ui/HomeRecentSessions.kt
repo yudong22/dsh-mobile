@@ -226,7 +226,8 @@ private fun HomeRecentEmptyState(connection: GatewayConnectionState) {
     val message = when (connection.dshPhase) {
         DshConnectionPhase.IN_PROGRESS -> "正在连接…会话到达后会自动出现在这里。"
         DshConnectionPhase.ATTENTION -> "连接不可用。恢复连接后这里会显示当前项目的最近会话。"
-        DshConnectionPhase.ONLINE -> "当前项目还没有会话，点上面的「新建会话」开始一个。"
+        // 这里引用了首页按钮的文案，改名时必须一起改，否则空态会指向一个不存在的按钮。
+        DshConnectionPhase.ONLINE -> "当前项目还没有任务，点上面的「新建任务」开始一个。"
         DshConnectionPhase.IDLE -> "连接设备后，这里会按最近活动时间列出当前项目的会话。"
     }
     Box(

@@ -86,12 +86,19 @@ class AndroidMultiGatewayStore(private val application: Application) {
             runCatching {
                 val raw = preferences.getString("profiles", null)
                 if (raw != null) {
-                    profiles = profileJson.decodeFromString(raw)
-                    require(profiles.map { it.localId }.distinct().size == profiles.size)
-                    profiles.forEach { profile ->
+                    val loaded: List<GatewayProfile> = profileJson.decodeFromString(raw)
+                    require(loaded.map { it.localId }.distinct().size == loaded.size)
+                    loaded.forEach { profile ->
                         GatewayIdentity.validate(null, profile.localId)
                         require(profile.endpoints.isNotEmpty() && profile.endpoints.size <= MAX_ENDPOINTS)
                     }
+                    // 一次性幂等修复：早期版本会为同一台机器建出多条 profile，
+                    // 各自的 localId 下各挂一份缓存。合并时保留**最早**那条的 localId，
+                    // 否则用户升级后会看到「会话全没了」。
+                    // 只在真的合并掉条目时才写盘，避免每次启动都改写磁盘。
+                    val deduplicated = PairingIdentityResolver.deduplicate(loaded)
+                    profiles = deduplicated
+                    if (deduplicated.size != loaded.size) persist()
                 } else {
                     val old = legacyPreferences.load()
                     if (credentials.loadToken(old.endpoint) != null || old.sessionsJson != null) {
@@ -291,23 +298,8 @@ class AndroidMultiGatewayStore(private val application: Application) {
             }
     }
 
-    private fun pairingProfile(payload: com.clarklevis.dsh.shared.protocol.GatewayPairingPayload, endpoints: List<String>): GatewayProfile {
-        val existing = profiles.firstOrNull {
-            if (payload.gatewayId != null) {
-                payload.gatewayId.equals(it.gatewayId, true)
-            } else {
-                it.gatewayId == null && endpoints.first() in it.endpoints
-            }
-        }
-        val profile = existing ?: GatewayProfile(
-            UUID.randomUUID().toString(),
-            payload.gatewayId?.lowercase(),
-            payload.gatewayName ?: GatewayIdentity.host(endpoints.first()),
-            endpoints = endpoints,
-            server = !GatewayIdentity.isLocal(GatewayIdentity.host(endpoints.first()))
-        )
-        return profile.copy(endpoints = endpoints, preferredEndpoint = endpoints.first())
-    }
+    private fun pairingProfile(payload: com.clarklevis.dsh.shared.protocol.GatewayPairingPayload, endpoints: List<String>): GatewayProfile =
+        PairingIdentityResolver.resolve(profiles, payload, endpoints)
 
     fun cancelPairing() {
         pairing = false

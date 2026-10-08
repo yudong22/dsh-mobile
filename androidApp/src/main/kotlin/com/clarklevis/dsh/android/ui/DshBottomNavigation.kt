@@ -18,6 +18,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,6 +38,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clarklevis.dsh.android.R
@@ -42,9 +47,12 @@ import com.clarklevis.dsh.shared.gateway.GatewayConnectionState
 /**
  * 底部主导航的条目。
  *
- * 左三项是页面目的地（任务 / 项目 / 定时任务），右两项是全局动作（设置 / 扫码）——
+ * 左三项是页面目的地（任务列表 / 项目 / 定时任务），右两项是全局动作（设置 / 扫码）——
  * 设置与扫码原先在首页顶栏，为腾出顶部空间并统一到拇指可达区域而下移。
  * 「专家」与「资料库」已移除：前者改由设置页的 Agent 预设入口承担，后者不再提供。
+ *
+ * 「任务列表」而不是「任务」：该 Tab 的落点是任务列表页，用「任务列表」能区别于抽屉里
+ * 同名的「任务 (n)」区块标题。`label` 同时是读屏用的 contentDescription。
  *
  * 视觉比例对齐改版截图：整条 84dp 高、图标 26dp、标签 11sp、选中态用主文字色、未选中用三级文字色。
  */
@@ -53,7 +61,7 @@ internal enum class DshTab(
     val iconRes: Int,
     val testTag: String
 ) {
-    TASKS("任务", R.drawable.ic_tab_tasks, "tab-tasks"),
+    TASKS("任务列表", R.drawable.ic_tab_tasks, "tab-tasks"),
     PROJECTS("项目", R.drawable.ic_tab_projects, "tab-projects"),
     SCHEDULES("定时任务", R.drawable.ic_drawer_schedule, "tab-schedules"),
     SETTINGS("设置", R.drawable.ic_settings, "tab-settings"),
@@ -143,6 +151,43 @@ private fun DshTabItem(
 }
 
 /**
+ * 打开侧边抽屉的圆钮：三条横线。
+ *
+ * 首页与会话页（任务详情）共用同一个组件——两处的动作完全相同（打开同一个抽屉快速切换任务），
+ * 外观不一致会让人以为是两个不同入口。
+ *
+ * 此前首页按钮只画了两条横线（`repeat(2)`），与「抽屉/汉堡」的通用识别形状不符；
+ * 这里统一为三条，两处一起生效。
+ */
+@Composable
+internal fun DshDrawerButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Dp = 47.dp,
+    testTag: String = "drawer-button"
+) {
+    val palette = dshPalette()
+    Box(
+        modifier = modifier
+            .size(size)
+            .background(palette.surface, CircleShape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = "打开侧边栏" }
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            repeat(3) {
+                Box(
+                    Modifier.size(width = 19.dp, height = 2.dp)
+                        .background(palette.textPrimary, RoundedCornerShape(1.dp))
+                )
+            }
+        }
+    }
+}
+
+/**
  * 截图首页顶部的品牌胶囊：左侧圆形菜单按钮 + 两行标题（主标题 + 设备/工作空间副标题）。
  *
  * 标题区域整体可点击，点击弹出「任务运行设置」面板。
@@ -162,24 +207,11 @@ internal fun DshBrandHeader(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(47.dp)
-                .background(palette.surface, CircleShape)
-                .clickable(role = Role.Button, onClick = onOpenDrawer)
-                .semantics { contentDescription = "打开侧边栏" }
-                .testTag("brand-drawer-button"),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                repeat(2) {
-                    Box(
-                        Modifier.size(width = 19.dp, height = 2.dp)
-                            .background(palette.textPrimary, RoundedCornerShape(1.dp))
-                    )
-                }
-            }
-        }
+        // 保留既有 testTag，避免影响依赖它的用例；视觉由共享组件统一。
+        DshDrawerButton(
+            onClick = onOpenDrawer,
+            testTag = "brand-drawer-button"
+        )
         Row(
             modifier = Modifier.padding(start = 14.dp).weight(1f)
                 .clip(RoundedCornerShape(12.dp))
@@ -264,6 +296,46 @@ internal fun DshBrandHeader(
             }
         }
         trailing()
+    }
+}
+
+/**
+ * 底栏 + 「扫码」认证菜单的组合外壳。
+ *
+ * 「扫码」不是页面目的地而是全局动作（在原位展开菜单），所以它与底栏强绑定：
+ * 哪个页面挂了底栏，哪里就必须能开这个菜单，否则表现为「点了没反应」。
+ * 把它封装在这里，各页面只需把本组件放进 `Scaffold(bottomBar = ...)`，
+ * 不必各自重复一遍菜单与锚点逻辑。
+ */
+@Composable
+internal fun DshBottomBarHost(
+    selected: DshTab,
+    onSelectTab: (DshTab) -> Unit,
+    onScanRequested: () -> Unit,
+    onManualEntryRequested: () -> Unit
+) {
+    // 菜单展开态是纯 UI 状态，随屏幕重建保留即可。
+    var showAuthMenu by rememberSaveable { mutableStateOf(false) }
+    Box {
+        DshBottomTabBar(
+            selected = selected,
+            onSelect = { tab ->
+                if (tab == DshTab.SCAN) showAuthMenu = true else onSelectTab(tab)
+            }
+        )
+        // 菜单锚在底栏左上角区域；向上弹以免超出屏幕底部。
+        GatewayAuthenticationMenuContent(
+            expanded = showAuthMenu,
+            onDismissRequest = { showAuthMenu = false },
+            onScan = {
+                showAuthMenu = false
+                onScanRequested()
+            },
+            onManualEntry = {
+                showAuthMenu = false
+                onManualEntryRequested()
+            }
+        )
     }
 }
 

@@ -2,6 +2,8 @@ package com.clarklevis.dsh.android.ui
 
 import android.app.Activity
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -10,12 +12,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -53,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.clarklevis.dsh.android.AndroidNotificationSessionRoute
 import com.clarklevis.dsh.android.AndroidSharedStateHolder
@@ -77,6 +85,7 @@ private const val ROUTE_SCHEDULED_TASKS = "scheduled-tasks"
 /** 底部「工作区」标签的目的地。 */
 private const val ROUTE_PROJECTS = "projects"
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun DshProductApp(
     stateHolder: AndroidSharedStateHolder,
@@ -109,98 +118,346 @@ internal fun DshProductApp(
             isAppearanceLightNavigationBars = !dark
         }
     }
-    NavHost(
-        navController = navController,
-        startDestination = ROUTE_WORKSPACE,
-        enterTransition = {
-            slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Left, tween(260))
-        },
-        exitTransition = {
-            slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Left, tween(260))
-        },
-        popEnterTransition = {
-            slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Right, tween(260))
-        },
-        popExitTransition = {
-            slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Right, tween(260))
-        }
-    ) {
-        composable(ROUTE_WORKSPACE) {
-            val workspaceScope = rememberCoroutineScope()
-            WorkspaceScreen(
-                stateHolder = stateHolder,
-                onOpenSession = { id ->
-                    stateHolder.selectSession(id)
-                    navController.navigate(ROUTE_CONVERSATION)
-                },
-                onNewSession = {
-                    workspaceScope.launch {
-                        if (stateHolder.prepareNewSession()) {
-                            navController.navigate(ROUTE_CONVERSATION)
-                        }
-                    }
-                },
-                onSettings = { navController.navigate(ROUTE_SETTINGS) },
-                onPlugins = { navController.navigate(ROUTE_PLUGINS) },
-                onScheduledTasks = { navController.navigate(ROUTE_SCHEDULED_TASKS) },
-                onProjects = { navController.navigate(ROUTE_PROJECTS) }
+
+    // ---- 抽屉与底栏提升到应用外壳（v1.9.0 点 5 + 点 6）----
+    // 此前抽屉只包住首页正文，因此会话页拿不到它；底栏也只有首页有。
+    // 现在两者都挂在 NavHost 之上，所有核心页面共享同一份抽屉状态与会话投影
+    // （`workspaceScopedSessions` 保持唯一实现，不复制成两份）。
+    val application = LocalContext.current.applicationContext as? DshAndroidApplication
+    val hosts = application?.hosts
+    val workspaces = stateHolder.availableWorkspaces
+    val selectedWorkspace = stateHolder.activeWorkspace
+    val ungroupedSelected = stateHolder.isUngroupedWorkspaceSelected
+    val homeSessions = stateHolder.homeSessions
+    val sessions = remember(homeSessions, workspaces, stateHolder.selectedWorkspaceId) {
+        workspaceScopedSessions(
+            sessions = homeSessions,
+            workspaces = workspaces,
+            selectedWorkspaceId = stateHolder.selectedWorkspaceId
+        )
+    }
+    val context = LocalContext.current
+    val appVersionLabel = remember(context) {
+        runCatching {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            "v${info.versionName}"
+        }.getOrNull()
+    }
+    val drawerDevices = remember(hosts?.profiles, hosts?.activeId, hosts?.onlineIds) {
+        hosts?.profiles.orEmpty().map { profile ->
+            DrawerDeviceOption(
+                id = profile.localId,
+                name = profile.displayName,
+                isServer = profile.server,
+                online = profile.localId in hosts?.onlineIds.orEmpty(),
+                selected = profile.localId == hosts?.activeId
             )
         }
-        composable(ROUTE_CONVERSATION) {
-            ConversationScreen(stateHolder, onPickImage, navController::popBackStack)
+    }
+    // 扫码与手动配对原先挂在首页内部；提升后从任意核心页面都能唤起。
+    var showQrScanner by rememberSaveable { mutableStateOf(false) }
+    var showManualPairing by rememberSaveable { mutableStateOf(false) }
+    val shellScope = rememberCoroutineScope()
+
+    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+    val currentTab = dshTabForRoute(currentRoute)
+
+    /** 底栏切换：以首页为栈底替换顶层目的地，避免反复点 Tab 无界压栈。 */
+    fun navigateToTab(tab: DshTab) {
+        val route = when (tab) {
+            DshTab.TASKS -> ROUTE_WORKSPACE
+            DshTab.PROJECTS -> ROUTE_PROJECTS
+            DshTab.SCHEDULES -> ROUTE_SCHEDULED_TASKS
+            DshTab.SETTINGS -> ROUTE_SETTINGS
+            DshTab.SCAN -> return
         }
-        composable(ROUTE_SETTINGS) {
-            SettingsScreen(
-                stateHolder = stateHolder,
-                onBack = navController::popBackStack,
-                onOpenAgentPresets = { navController.navigate(ROUTE_SETTINGS_AGENT_PRESETS) },
-                onOpenDefaultModel = { navController.navigate(ROUTE_SETTINGS_DEFAULT_MODEL) }
-            )
+        if (route == currentRoute) return
+        navController.navigate(route) {
+            popUpTo(ROUTE_WORKSPACE) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
         }
-        composable(ROUTE_SETTINGS_AGENT_PRESETS) {
-            AgentPresetSelectionScreen(stateHolder, navController::popBackStack)
+    }
+
+    /**
+     * 打开某个任务。
+     *
+     * 已经在会话页时**只切换选中**、不再导航：抽屉可以在会话页打开（点 5），
+     * 若这里仍裸 `navigate`，连点 N 个任务就会压入 N 层重复的会话条目，
+     * 返回要按 N 次。会话内容本身由 `selectedSessionId` 驱动重渲染，无需新条目。
+     */
+    fun openSession(sessionId: String) {
+        stateHolder.selectSession(sessionId)
+        if (!requiresConversationNavigation(currentRoute)) return
+        navController.navigate(ROUTE_CONVERSATION) {
+            popUpTo(ROUTE_WORKSPACE)
+            launchSingleTop = true
         }
-        composable(ROUTE_SETTINGS_DEFAULT_MODEL) {
-            DefaultModelSelectionScreen(stateHolder, navController::popBackStack)
-        }
-        composable(ROUTE_PLUGINS) {
-            DrawerDestinationScreen("插件", "插件功能尚未接入", navController::popBackStack)
-        }
-        composable(ROUTE_SCHEDULED_TASKS) {
-            ScheduledTasksScreen(
-                stateHolder = stateHolder,
-                onBack = navController::popBackStack,
-                onOpenSession = { sessionId ->
-                    stateHolder.selectSession(sessionId)
+    }
+
+    WorkspaceDrawer(
+        sessions = sessions,
+        gatewayLabel = stateHolder.activeGatewayDisplayName(),
+        connection = stateHolder.gatewayState.connection,
+        deviceIsServer = hosts?.activeProfile?.server == true,
+        devices = drawerDevices,
+        onSelectDevice = { id ->
+            hosts?.profiles?.firstOrNull { it.localId == id }?.let { hosts.select(it) }
+        },
+        onPairNewDevice = { showQrScanner = true },
+        spaces = workspaces,
+        selectedWorkspaceId = stateHolder.selectedWorkspaceId,
+        ungroupedSelected = ungroupedSelected,
+        // 账户卡展示产品身份而不是设备名：设备名已在上一行的设备下拉里，
+        // 重复显示会让人误以为「账户名 = 设备名」。
+        accountName = "DeepSeek Harness",
+        accountPlan = "标准版",
+        accountQuota = appVersionLabel,
+        onOpenSession = ::openSession,
+        onNewSession = {
+            // prepareNewSession 是 suspend，必须在协程里调用。
+            shellScope.launch {
+                navController.navigate(ROUTE_WORKSPACE) { launchSingleTop = true }
+                if (stateHolder.prepareNewSession()) {
                     navController.navigate(ROUTE_CONVERSATION) {
                         popUpTo(ROUTE_WORKSPACE)
                         launchSingleTop = true
                     }
                 }
-            )
-        }
-        composable(ROUTE_PROJECTS) {
-            ProjectsTabScreen(
-                stateHolder = stateHolder,
-                onBack = navController::popBackStack
-            )
+            }
+        },
+        onRenameSession = stateHolder::renameSession,
+        onArchiveSession = stateHolder::archiveSession,
+        onSelectWorkspace = { id -> stateHolder.selectWorkspace(id) },
+        onPlugins = { navController.navigate(ROUTE_PLUGINS) }
+    ) { openDrawer, canScrollVertically ->
+        val tab = currentTab
+        // 底栏在两种情况下不显示：下钻页（tab == null），或键盘弹出时（见下方注释）。
+        // 只有**确实显示**时才消费导航栏 inset——否则下钻页的列表会把 inset 扣掉，
+        // 内容滑到导航栏底下。
+        val showsBottomBar = tab != null && !WindowInsets.isImeVisible
+        Column(Modifier.fillMaxSize()) {
+            NavHost(
+                navController = navController,
+                startDestination = ROUTE_WORKSPACE,
+                // 底栏显示时它已占据底部区域（自身带 navigationBarsPadding），因此在这一层
+                // 把导航栏 inset 消费掉：页内再调 `navigationBarsPadding()` 或 Scaffold 默认
+                // contentWindowInsets 时解析为 0，避免同一条 inset 计两次而多出一条空白
+                // （四个 Tab 目的地都会再取一次）。
+                modifier = Modifier.weight(1f).then(
+                    if (showsBottomBar) {
+                        Modifier.consumeWindowInsets(WindowInsets.navigationBars)
+                    } else {
+                        Modifier
+                    }
+                ),
+                // 底栏切换是「平级跳转」，不该有横向滑入动画：那是下钻（进入详情）的语义，
+                // 用在平级切换上会让人以为进了一层。这里按**起止路由是否都是 Tab 目的地**
+                // 判定（而不是按单个目的地），因此：
+                // - 首页 ↔ 项目/定时任务/设置：瞬时切换（点 2）；
+                // - 首页 → 会话详情：保留左滑（真实下钻）；
+                // - 会话详情 → 返回：保留右滑。
+                enterTransition = {
+                    if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
+                        EnterTransition.None
+                    } else {
+                        slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Left, tween(260))
+                    }
+                },
+                exitTransition = {
+                    if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
+                        ExitTransition.None
+                    } else {
+                        slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Left, tween(260))
+                    }
+                },
+                popEnterTransition = {
+                    if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
+                        EnterTransition.None
+                    } else {
+                        slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Right, tween(260))
+                    }
+                },
+                popExitTransition = {
+                    if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
+                        ExitTransition.None
+                    } else {
+                        slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Right, tween(260))
+                    }
+                }
+            ) {
+                composable(ROUTE_WORKSPACE) {
+                    WorkspaceScreen(
+                        stateHolder = stateHolder,
+                        sessions = sessions,
+                        openDrawer = openDrawer,
+                        canScrollVertically = canScrollVertically,
+                        onOpenSession = { id ->
+                            stateHolder.selectSession(id)
+                            navController.navigate(ROUTE_CONVERSATION)
+                        },
+                        onNewSession = {
+                            // prepareNewSession 是 suspend，必须在协程里调用。
+                            shellScope.launch {
+                                if (stateHolder.prepareNewSession()) {
+                                    navController.navigate(ROUTE_CONVERSATION)
+                                }
+                            }
+                        }
+                    )
+                }
+                composable(ROUTE_CONVERSATION) {
+                    ConversationScreen(
+                        stateHolder = stateHolder,
+                        onPickImage = onPickImage,
+                        onBack = navController::popBackStack,
+                        onOpenDrawer = openDrawer
+                    )
+                }
+                composable(ROUTE_SETTINGS) {
+                    SettingsScreen(
+                        stateHolder = stateHolder,
+                        onBack = navController::popBackStack,
+                        onOpenAgentPresets = { navController.navigate(ROUTE_SETTINGS_AGENT_PRESETS) },
+                        onOpenDefaultModel = { navController.navigate(ROUTE_SETTINGS_DEFAULT_MODEL) }
+                    )
+                }
+                composable(ROUTE_SETTINGS_AGENT_PRESETS) {
+                    AgentPresetSelectionScreen(stateHolder, navController::popBackStack)
+                }
+                composable(ROUTE_SETTINGS_DEFAULT_MODEL) {
+                    DefaultModelSelectionScreen(stateHolder, navController::popBackStack)
+                }
+                composable(ROUTE_PLUGINS) {
+                    DrawerDestinationScreen("插件", "插件功能尚未接入", navController::popBackStack)
+                }
+                composable(ROUTE_SCHEDULED_TASKS) {
+                    ScheduledTasksScreen(
+                        stateHolder = stateHolder,
+                        onBack = navController::popBackStack,
+                        onOpenSession = ::openSession
+                    )
+                }
+                composable(ROUTE_PROJECTS) {
+                    ProjectsTabScreen(
+                        stateHolder = stateHolder,
+                        onBack = navController::popBackStack,
+                        // 选中项目后回到任务列表：项目页恒由首页压栈，故 popBackStack 即回到
+                        // ROUTE_WORKSPACE。这样「点项目」的意图（去看它的任务）才有结果。
+                        onProjectSelected = navController::popBackStack
+                    )
+                }
+            }
+            // 核心页面保留完整切换导航（点 6）。二级下钻页（插件、Agent 预设、
+            // 默认模型）返回 null，不挂底栏——它们是下钻而非目的地。
+            //
+            // 底栏是 NavHost 的**兄弟节点**：页面切换时它保持不动（符合「常驻导航」的
+            // 预期），同时仍在抽屉的「滑动页面」内部，抽屉打开时会随内容一起右移。
+            //
+            // 键盘弹出时隐藏底栏（`showsBottomBar` 的第二个条件）：`adjustResize` 下键盘
+            // 缩小 layoutHeight，会把底栏顶到键盘正上方，与同样 `.imePadding()` 上浮的
+            // 输入框叠加，吃掉约 84dp 输入区。首页从不暴露此问题（它没有输入框）。
+            if (showsBottomBar) {
+                DshBottomBarHost(
+                    selected = requireNotNull(tab),
+                    onSelectTab = ::navigateToTab,
+                    onScanRequested = {
+                        stateHolder.clearPlatformError()
+                        showQrScanner = true
+                    },
+                    onManualEntryRequested = {
+                        stateHolder.clearPlatformError()
+                        showManualPairing = true
+                    }
+                )
+            }
         }
     }
+
+    if (showQrScanner) {
+        GatewayQrScannerScreen(
+            onCode = { payload ->
+                showQrScanner = false
+                stateHolder.pair(payload)
+            },
+            onCancel = { showQrScanner = false },
+            onFailure = { message ->
+                showQrScanner = false
+                stateHolder.showPlatformError(message)
+            }
+        )
+    }
+    if (showManualPairing) {
+        ManualGatewayPairingSheet(stateHolder) { showManualPairing = false }
+    }
     stateHolder.platformError?.let { error ->
+        // 「重新连接」只在连接**真的需要用户介入**时给出：
+        // - 过渡态（连接中/认证中）说明重连已在进行，此时再给一个「重新连接」
+        //   只会诱导用户重复触发，而两个按钮的差别也说不清；
+        // - 未连接/已暂停属于空闲态，重连同样会自行发生（回前台时
+        //   applicationDidBecomeActive → scheduleReconnectLocked）。
+        // 只有连接失败或等待网络才需要人决定是否重试。
+        val needsManualReconnect = stateHolder.gatewayState.connection.dshPhase ==
+            DshConnectionPhase.ATTENTION
         DshAlertDialog(
             title = "DeepSeek Harness",
             message = error,
             onDismissRequest = stateHolder::clearPlatformError,
             dismissLabel = "好",
             onDismissClick = stateHolder::clearPlatformError,
-            confirmLabel = "重新连接",
-            onConfirm = {
-                stateHolder.clearPlatformError()
-                stateHolder.connect()
+            confirmLabel = if (needsManualReconnect) "重新连接" else null,
+            onConfirm = if (needsManualReconnect) {
+                {
+                    stateHolder.clearPlatformError()
+                    stateHolder.connect()
+                }
+            } else {
+                null
             }
         )
     }
 }
+
+/**
+ * 路由 → 底栏选中项。返回 `null` 表示该路由是二级下钻页，不显示底栏。
+ *
+ * 会话页归入「任务列表」：它是任务列表里某一条任务的详情，不是独立目的地。
+ * （因此它虽然显示底栏，却**不算**平级 Tab 目的地——见 [isTabToTab]。）
+ */
+internal fun dshTabForRoute(route: String?): DshTab? = when (route) {
+    ROUTE_WORKSPACE, ROUTE_CONVERSATION -> DshTab.TASKS
+    ROUTE_PROJECTS -> DshTab.PROJECTS
+    ROUTE_SCHEDULED_TASKS -> DshTab.SCHEDULES
+    ROUTE_SETTINGS -> DshTab.SETTINGS
+    else -> null
+}
+
+/** 底栏四个平级目的地。用来判定「这次跳转是不是 Tab 切换」。 */
+private val TAB_ROOT_ROUTES = setOf(
+    ROUTE_WORKSPACE,
+    ROUTE_PROJECTS,
+    ROUTE_SCHEDULED_TASKS,
+    ROUTE_SETTINGS
+)
+
+/**
+ * 在 [currentRoute] 上打开一个任务时，是否需要**导航**到会话页。
+ *
+ * 已经在会话页时返回 `false`：抽屉可以在会话页打开（点 5），用它连续切换 N 个任务
+ * 若是每次都裸 `navigate`，就会压入 N 层重复的会话条目，返回要按 N 次。
+ * 会话内容本身由 `selectedSessionId` 驱动重渲染，不需要新的返回栈条目。
+ */
+internal fun requiresConversationNavigation(currentRoute: String?): Boolean =
+    currentRoute != ROUTE_CONVERSATION
+
+/**
+ * 两个路由之间是否属于「底栏平级切换」——决定要不要播放横向滑动动画。
+ *
+ * 判据是**两端都是 Tab 根目的地且不相同**。刻意不包含会话页：虽然它挂底栏
+ * （归在「任务列表」下），但进入它是下钻，应当保留滑动语义。
+ */
+internal fun isTabToTab(from: String?, to: String?): Boolean =
+    from != null && to != null && from != to && from in TAB_ROOT_ROUTES && to in TAB_ROOT_ROUTES
 
 @Composable
 private fun DrawerDestinationScreen(title: String, message: String, onBack: () -> Unit) {
@@ -255,21 +512,23 @@ internal fun DshPageHeader(
     }
 }
 
+/**
+ * 首页正文：当前项目卡 + 新建任务 + 最近活跃任务。
+ *
+ * 抽屉与底栏已上移到 [DshProductApp] 的应用外壳（v1.9.0 点 5/6），
+ * 本函数只负责「滑动页面」内的内容。`sessions` 由外壳统一投影后传入，
+ * 保证首页与抽屉永远来自同一份 `workspaceScopedSessions` 结果。
+ */
 @Composable
 private fun WorkspaceScreen(
     stateHolder: AndroidSharedStateHolder,
+    sessions: List<SessionSummary>,
+    openDrawer: () -> Unit,
+    canScrollVertically: Boolean,
     onOpenSession: (String) -> Unit,
-    onNewSession: () -> Unit,
-    onSettings: () -> Unit,
-    onPlugins: () -> Unit,
-    onScheduledTasks: () -> Unit,
-    onProjects: () -> Unit
+    onNewSession: () -> Unit
 ) {
-    var showManualPairing by rememberSaveable { mutableStateOf(false) }
-    var showQrScanner by rememberSaveable { mutableStateOf(false) }
     var showRuntimeSettings by rememberSaveable { mutableStateOf(false) }
-    // 底栏「扫码」展开的认证菜单（扫码 / 手动输入）。原先挂在顶栏，现已下移。
-    var showAuthMenu by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(stateHolder.gatewayState.connection) { stateHolder.refreshProductState() }
 
     val workspaces = stateHolder.availableWorkspaces
@@ -278,177 +537,69 @@ private fun WorkspaceScreen(
     // 经派生状态读取，而不是直接读 stateHolder.snapshot：后者是单个 mutableStateOf，
     // 任何字段变化（例如只改 conversation 的流式发布）都会让整个首页失效重组。
     val homeSessions = stateHolder.homeSessions
-    // 抽屉与首页共用这一份「当前项目」过滤结果（`workspaceScopedSessions`），
-    // 保证两处永远来自同一个投影，不会分叉成两个列表。
-    val sessions = remember(homeSessions, workspaces, stateHolder.selectedWorkspaceId) {
-        workspaceScopedSessions(
-            sessions = homeSessions,
-            workspaces = workspaces,
-            selectedWorkspaceId = stateHolder.selectedWorkspaceId
-        )
-    }
-    val palette = dshPalette()
-
     // O(会话 × 工作区) 的统计放在 remember 里：直接写在 item 体内会随每次重组重跑。
     val ungroupedSessionCount = remember(homeSessions, workspaces) {
         homeSessions.count { session ->
             session.isVisibleInHistory && workspaces.none { session.id in it.sessionIds }
         }
     }
-    // 当前主机是否为「服务器」类型，决定抽屉设备图标的形态。
-    val application = LocalContext.current.applicationContext as? DshAndroidApplication
-    // 从 PackageManager 读版本号，避免像 "v1.8.0" 那样写死后在发版时忘记同步
-    // （buildConfig 未启用，所以没有 BuildConfig.VERSION_NAME 可用）。
-    val context = LocalContext.current
-    val appVersionLabel = remember(context) {
-        runCatching {
-            val info = context.packageManager.getPackageInfo(context.packageName, 0)
-            "v${info.versionName}"
-        }.getOrNull()
-    }
-    val hosts = application?.hosts
-    val activeGatewayIsServer = hosts?.activeProfile?.server == true
     // 未连接时新建会失败（prepareNewSession 会拒绝），因此这里与抽屉一致地置灰，
     // 避免用户点了才看到报错。
     val canStartNewSession = !stateHolder.gatewayState.connection.dshBlocksNetworkActions
-    // 抽屉设备下拉的数据源：已配对设备 + 在线/选中态。
-    val drawerDevices = remember(hosts?.profiles, hosts?.activeId, hosts?.onlineIds) {
-        hosts?.profiles.orEmpty().map { profile ->
-            DrawerDeviceOption(
-                id = profile.localId,
-                name = profile.displayName,
-                isServer = profile.server,
-                online = profile.localId in hosts?.onlineIds.orEmpty(),
-                selected = profile.localId == hosts?.activeId
-            )
-        }
-    }
-    // 底部标签栏必须放在抽屉的「滑动页面」内部：抽屉打开时它随页面向右滑走，
-    // 与参考截图一致；若留在 Scaffold 的 bottomBar 上，抽屉展开后标签栏会悬在抽屉上方。
-    WorkspaceDrawer(
-        sessions = sessions,
-        gatewayLabel = stateHolder.activeGatewayDisplayName(),
-        connection = stateHolder.gatewayState.connection,
-        deviceIsServer = activeGatewayIsServer,
-        devices = drawerDevices,
-        onSelectDevice = { id ->
-            hosts?.profiles?.firstOrNull { it.localId == id }?.let { hosts.select(it) }
-        },
-        onPairNewDevice = { showQrScanner = true },
-        spaces = workspaces,
-        selectedWorkspaceId = stateHolder.selectedWorkspaceId,
-        ungroupedSelected = ungroupedSelected,
-        // 账户卡展示产品身份而不是设备名：设备名已在上一行的设备下拉里，
-        // 重复显示会让人误以为「账户名 = 设备名」。
-        accountName = "DeepSeek Harness",
-        accountPlan = "标准版",
-        accountQuota = appVersionLabel,
-        onOpenSession = onOpenSession,
-        onNewSession = onNewSession,
-        onRenameSession = stateHolder::renameSession,
-        onArchiveSession = stateHolder::archiveSession,
-        onSelectWorkspace = { id -> stateHolder.selectWorkspace(id) },
-        onPlugins = onPlugins
-    ) { openDrawer, canScrollVertically ->
-        Column(Modifier.fillMaxSize()) {
-            LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth()
-                    .statusBarsPadding()
-                    .testTag("workspace-screen"),
-                contentPadding = PaddingValues(horizontal = 18.dp),
-                userScrollEnabled = canScrollVertically
-            ) {
-                item {
-                    Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                        DshBrandHeader(
-                            title = "DeepSeek Harness",
-                            subtitle = runtimeHeaderSubtitle(
-                                deviceLabel = stateHolder.activeGatewayDisplayName(),
-                                workspaceLabel = selectedWorkspace?.title
-                                    ?: if (ungroupedSelected) "未分组" else null
-                            ),
-                            connection = stateHolder.gatewayState.connection,
-                            onOpenDrawer = openDrawer,
-                            onOpenRuntimeSettings = { showRuntimeSettings = true }
-                        )
-                        Spacer(Modifier.height(20.dp))
-                        // 当前项目目录：纯指示，不再挂下拉。切换/新增项目统一走底栏「项目」Tab
-                        // （ProjectsTabScreen 已有目录浏览器入口），避免首页与底栏两处重复入口。
-                        WorkspaceCard(
-                            workspace = selectedWorkspace,
-                            ungrouped = ungroupedSelected,
-                            ungroupedCount = ungroupedSessionCount,
-                            state = stateHolder.gatewayState
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        DshNewTaskButton(
-                            label = "新建会话",
-                            onClick = onNewSession,
-                            enabled = canStartNewSession
-                        )
-                        Spacer(Modifier.height(22.dp))
-                        // 首页正文：当前项目目录下的最近活跃会话。本区块自行截断，
-                        // 完整列表仍在抽屉「任务」区块里（两者共用同一份 `sessions`）。
-                        HomeRecentSessions(
-                            allSessions = sessions,
-                            connection = stateHolder.gatewayState.connection,
-                            onOpenSession = onOpenSession,
-                            onRenameSession = stateHolder::renameSession,
-                            onArchiveSession = stateHolder::archiveSession,
-                            onShowAll = openDrawer
-                        )
-                    }
-                }
-                item { Spacer(Modifier.height(24.dp)) }
-            }
-            Box {
-                DshBottomTabBar(
-                    selected = DshTab.TASKS,
-                    onSelect = { tab ->
-                        when (tab) {
-                            DshTab.TASKS -> Unit
-                            DshTab.PROJECTS -> onProjects()
-                            DshTab.SCHEDULES -> onScheduledTasks()
-                            DshTab.SETTINGS -> onSettings()
-                            // 扫码是全局动作，不做页面跳转：在底栏原位展开认证菜单
-                            // （扫码 / 手动输入），与顶栏原先的行为一致。
-                            DshTab.SCAN -> showAuthMenu = true
-                        }
-                    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize()
+            .statusBarsPadding()
+            .testTag("workspace-screen"),
+        contentPadding = PaddingValues(horizontal = 18.dp),
+        userScrollEnabled = canScrollVertically
+    ) {
+        item {
+            Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                DshBrandHeader(
+                    title = "DeepSeek Harness",
+                    subtitle = runtimeHeaderSubtitle(
+                        deviceLabel = stateHolder.activeGatewayDisplayName(),
+                        workspaceLabel = selectedWorkspace?.title
+                            ?: if (ungroupedSelected) "未分组" else null
+                    ),
+                    connection = stateHolder.gatewayState.connection,
+                    onOpenDrawer = openDrawer,
+                    onOpenRuntimeSettings = { showRuntimeSettings = true }
                 )
-                // 菜单锚在底栏左上角区域；向上弹以免超出屏幕底部。
-                GatewayAuthenticationMenuContent(
-                    expanded = showAuthMenu,
-                    onDismissRequest = { showAuthMenu = false },
-                    onScan = {
-                        stateHolder.clearPlatformError()
-                        showQrScanner = true
-                    },
-                    onManualEntry = {
-                        stateHolder.clearPlatformError()
-                        showManualPairing = true
-                    }
+                Spacer(Modifier.height(20.dp))
+                // 当前项目目录：纯指示，不再挂下拉。切换/新增项目统一走底栏「项目」Tab
+                // （ProjectsTabScreen 已有目录浏览器入口），避免首页与底栏两处重复入口。
+                WorkspaceCard(
+                    workspace = selectedWorkspace,
+                    ungrouped = ungroupedSelected,
+                    ungroupedCount = ungroupedSessionCount,
+                    state = stateHolder.gatewayState
+                )
+                Spacer(Modifier.height(14.dp))
+                DshNewTaskButton(
+                    // 与抽屉里的同名按钮保持一致（此前首页叫「新建会话」、抽屉叫
+                    // 「新建任务」，同一个动作两个叫法）。
+                    label = "新建任务",
+                    onClick = onNewSession,
+                    enabled = canStartNewSession
+                )
+                Spacer(Modifier.height(22.dp))
+                // 首页正文：当前项目目录下的最近活跃会话。本区块自行截断，
+                // 完整列表仍在抽屉「任务」区块里（两者共用同一份 `sessions`）。
+                HomeRecentSessions(
+                    allSessions = sessions,
+                    connection = stateHolder.gatewayState.connection,
+                    onOpenSession = onOpenSession,
+                    onRenameSession = stateHolder::renameSession,
+                    onArchiveSession = stateHolder::archiveSession,
+                    onShowAll = openDrawer
                 )
             }
         }
+        item { Spacer(Modifier.height(24.dp)) }
     }
 
-    if (showQrScanner) {
-        GatewayQrScannerScreen(
-            onCode = { payload ->
-                showQrScanner = false
-                stateHolder.pair(payload)
-            },
-            onCancel = { showQrScanner = false },
-            onFailure = { message ->
-                showQrScanner = false
-                stateHolder.showPlatformError(message)
-            }
-        )
-    }
-    if (showManualPairing) {
-        ManualGatewayPairingSheet(stateHolder) { showManualPairing = false }
-    }
     if (showRuntimeSettings) {
         RuntimeSettingsSheet(
             stateHolder = stateHolder,

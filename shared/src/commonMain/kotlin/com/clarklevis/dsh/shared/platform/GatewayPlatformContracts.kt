@@ -84,7 +84,15 @@ interface GatewayNetworkMonitor {
 data class GatewayPreferencesSnapshot(
     val endpoint: String = "ws://127.0.0.1:3080/ws/mobile",
     val selectedWorkspaceId: String? = null,
-    val sessionsJson: String? = null
+    val sessionsJson: String? = null,
+    /**
+     * 工作区映射缓存（编码形态见 `SharedWorkspaceCacheSnapshot`）。
+     *
+     * 没有它会怎样：冷启动/离线时 `availableWorkspaces` 为空，
+     * `workspaceScopedSessions` 会把**所有**会话判为「未归属」——
+     * 用户看到的是错误分组而不是空列表，因此更容易被当真。
+     */
+    val workspacesJson: String? = null
 )
 
 /** 仅保存非敏感配置；token 与 device id 不得进入该存储。 */

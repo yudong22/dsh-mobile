@@ -32,6 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -46,11 +48,17 @@ import com.clarklevis.dsh.android.R
  *
  * 这是首页之外**唯一**的项目切换入口：首页的项目卡已退化为纯指示（此前它另挂了一个
  * `WorkspaceSelectionMenu` 下拉，与这里功能重复，v1.8.3 已删除）。
+ *
+ * [onProjectSelected] 在选中某个项目后调用，用来回到任务列表——「点项目」的意图是
+ * 「切到这个项目去看它的任务」，留在项目页会让人以为没生效。**已选中的项目行也要调用**：
+ * 选中本身是幂等的（`applyWorkspaceSelection` 对同值提前返回），若把导航也一起 gate 掉，
+ * 那一行的点击就变成了死行。
  */
 @Composable
 internal fun ProjectsTabScreen(
     stateHolder: AndroidSharedStateHolder,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onProjectSelected: () -> Unit = onBack
 ) {
     val palette = dshPalette()
     var showDirectoryBrowser by remember { mutableStateOf(false) }
@@ -85,7 +93,11 @@ internal fun ProjectsTabScreen(
                     title = "未分组",
                     detail = "$ungroupedSessionCount 个未归属会话",
                     selected = stateHolder.isUngroupedWorkspaceSelected,
-                    onClick = { stateHolder.selectWorkspace(AndroidSharedStateHolder.UNGROUPED_WORKSPACE_ID) }
+                    testTag = "project-card-ungrouped",
+                    onClick = {
+                        stateHolder.selectWorkspace(AndroidSharedStateHolder.UNGROUPED_WORKSPACE_ID)
+                        onProjectSelected()
+                    }
                 )
             }
             items(workspaces, key = { it.workspaceId }) { workspace ->
@@ -93,7 +105,11 @@ internal fun ProjectsTabScreen(
                     title = workspace.title,
                     detail = workspace.path,
                     selected = workspace.workspaceId == stateHolder.selectedWorkspaceId,
-                    onClick = { stateHolder.selectWorkspace(workspace.workspaceId) }
+                    testTag = "project-card-${workspace.workspaceId}",
+                    onClick = {
+                        stateHolder.selectWorkspace(workspace.workspaceId)
+                        onProjectSelected()
+                    }
                 )
             }
             if (workspaces.isEmpty()) {
@@ -123,6 +139,7 @@ private fun ProjectCard(
     title: String,
     detail: String,
     selected: Boolean,
+    testTag: String,
     onClick: () -> Unit
 ) {
     val palette = dshPalette()
@@ -135,6 +152,8 @@ private fun ProjectCard(
                 RoundedCornerShape(20.dp)
             )
             .clickable(onClick = onClick)
+            .semantics { this.selected = selected }
+            .testTag(testTag)
             .padding(horizontal = 16.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
