@@ -88,14 +88,18 @@ final class AgentUserNotificationManager: NSObject, @preconcurrency UNUserNotifi
         )
     }
 
-    private func scheduleOnce(
-        identifier: String,
-        threadIdentifier: String,
-        gatewayID: String,
-        sessionID: String,
-        title: String,
-        body: String
-    ) {
+    /// 记录一次由网关投递的远程通知。
+    ///
+    /// 远程通知由系统在后台展示，App 不需要也不应该再排一次本地通知；这里只
+    /// 记住 `dedupeKey`，用于 App 在前台时由推送回调触发的补充展示，以及重连
+    /// 补发时避免同一条重复。
+    func recordRemoteDelivery(gatewayID: String, sessionID: String, dedupeKey: String?) {
+        guard let dedupeKey, !dedupeKey.isEmpty else { return }
+        remember(identifier: "agent.remote.\(gatewayID).\(sessionID).\(dedupeKey)")
+    }
+
+    /// 把标识写入去重环，并让本地路径复用同一份状态。
+    private func remember(identifier: String) {
         guard recentIdentifierSet.insert(identifier).inserted else { return }
         recentIdentifiers.append(identifier)
         if recentIdentifiers.count > maximumRememberedIdentifierCount {
@@ -105,6 +109,17 @@ final class AgentUserNotificationManager: NSObject, @preconcurrency UNUserNotifi
             recentIdentifierSet.subtract(removed)
         }
         UserDefaults.standard.set(recentIdentifiers, forKey: defaultsKey)
+    }
+
+    private func scheduleOnce(
+        identifier: String,
+        threadIdentifier: String,
+        gatewayID: String,
+        sessionID: String,
+        title: String,
+        body: String
+    ) {
+        remember(identifier: identifier)
 
         // 前台事件已经在会话界面展示；仍记录标识，避免重连后补弹旧通知。
         guard UIApplication.shared.applicationState == .background else { return }

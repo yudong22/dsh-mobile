@@ -5,6 +5,19 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+// The google-services plugin aborts the build when `google-services.json` is absent, and that file
+// is deliberately not committed (same policy as the keystore). CI provisions it from secrets for
+// release builds; every other job — including pull-request CI, which runs on a clean checkout —
+// has no config and must still build.
+//
+// A `plugins {}` entry cannot be conditional, so the plugin is applied imperatively below. The
+// version is pinned in the root `build.gradle.kts`, matching the official setup guide.
+val googleServicesFile = file("google-services.json")
+
+if (googleServicesFile.exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 /**
  * Release signing material. The keystore must never be committed, so it is resolved from
  * outside the repository:
@@ -119,6 +132,10 @@ dependencies {
     implementation(libs.androidx.camera.mlkit.vision)
     implementation(libs.androidx.camera.view)
     implementation(libs.mlkit.barcode.scanning)
+    // Firebase BoM keeps every Firebase artifact on a mutually compatible set; individual
+    // libraries must not carry their own version.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)

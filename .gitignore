@@ -40,5 +40,9 @@ keystore.properties
 *.jks
 *.keystore
 
+# Firebase config — resolved from outside the repository like the keystore, because it names the
+# push project and every registered signing-certificate fingerprint (see Docs/firebase-setup.md).
+google-services.json
+
 # Local AI-assistant / editor state
 .claude/

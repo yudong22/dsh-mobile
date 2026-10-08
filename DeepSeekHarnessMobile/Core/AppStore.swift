@@ -1652,6 +1652,16 @@ final class AppStore: ObservableObject {
         finishHistoryLoading(id)
     }
 
+    /// 通道就绪后消费待上报的推送 token。
+    ///
+    /// `hello` 到达与 socket 可写不一定是同一时刻，因此这里可能被调用多次；
+    /// 待上报 token 被取出一次即失效，重复调用不会重复发帧。
+    private func registerPushWithGatewayIfReady() {
+        guard let registration = AgentPushRegistrationManager.shared.takePendingRegistration() else { return }
+        gateway.registerPushToken(registration)
+        AgentPushRegistrationManager.shared.deliverySucceeded()
+    }
+
     private func subscribeToSession(_ sessionID: String?) {
         if let previous = selectedSessionId {
             try? kmpConversationStore.clearAssistantChunks(sessionID: previous)
@@ -1710,8 +1720,18 @@ final class AppStore: ObservableObject {
             waitingForNewSession = false
         }
         if ["session-queues", "session-queue", "queue-item-updated"].contains(frame.kind) { return }
+        if frame.kind == "push-registered" || frame.kind == "push-unregistered" {
+            // 网关确认收到投递地址；失败会走 error 帧，此时保留待上报 token 重试。
+            AgentPushRegistrationManager.shared.deliverySucceeded()
+        }
         if frame.kind == "hello" {
             usesAssistantStream = frame.capabilities?.contains("assistant-stream-v1") == true
+            // 网关在能力列表里通告推送支持后，才上报本机的 APNs token。
+            let supportsPush = frame.capabilities?.contains("push-notifications") == true
+            Task { @MainActor in
+                AgentPushRegistrationManager.shared.registerIfSupported(supportsPush: supportsPush)
+                registerPushWithGatewayIfReady()
+            }
         }
         if frame.subscriptionId != nil { drainKMPEventDeliveries() }
         defer { if frame.subscriptionId != nil { drainKMPEventDeliveries() } }

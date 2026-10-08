@@ -244,6 +244,27 @@ final class GatewayClient: ObservableObject {
 
     func ping() { send(["type": "ping"]) }
 
+    /// 上报本机的 APNs 投递地址。
+    ///
+    /// 每次 `hello` 之后都重发：APNs 会轮换 token，且网关可能在客户端不知情时
+    /// 被重装（设备文件随实例走），此时旧地址会静默失效。
+    func registerPushToken(_ registration: GatewayPushRegistration) {
+        send([
+            "type": "push-register",
+            "platform": registration.platform.wireValue,
+            "token": registration.token
+        ])
+    }
+
+    /// 注销投递地址。用户在系统设置关闭通知或解除配对时调用。
+    func unregisterPushToken(_ registration: GatewayPushRegistration) {
+        send([
+            "type": "push-unregister",
+            "platform": registration.platform.wireValue,
+            "token": registration.token
+        ])
+    }
+
     func requestWorkspaces() { send(["type": "workspaces"]) }
     func requestSessions() { send(["type": "sessions"]) }
     func requestHost() { send(["type": "host"]) }

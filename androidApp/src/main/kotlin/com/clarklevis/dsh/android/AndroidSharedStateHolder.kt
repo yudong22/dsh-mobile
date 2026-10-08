@@ -1200,6 +1200,20 @@ class AndroidSharedStateHolder(
         }
     }
 
+    /**
+     * 上报本机的 FCM 投递地址。
+     *
+     * 通道就绪时调用：`onNewToken` 可能早于任何一次连接，此时 token 已在
+     * [AndroidPushRegistrationStore] 落盘，等待这里消费。
+     */
+    fun submitPushRegistration(registration: com.clarklevis.dsh.shared.gateway.GatewayPushRegistration) {
+        val appGraph = graph ?: return
+        if (gatewayState.connection != GatewayConnectionState.CONNECTED) return
+        appGraph.gatewayScope.launch {
+            appGraph.gatewayRuntime.sendRequest(GatewayRequests.registerPush(registration))
+        }
+    }
+
     fun pingGateway() {
         val appGraph = graph ?: return
         if (gatewayState.connection != GatewayConnectionState.CONNECTED) return

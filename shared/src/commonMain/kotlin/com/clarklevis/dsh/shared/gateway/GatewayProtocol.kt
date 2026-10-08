@@ -58,6 +58,35 @@ data class GatewayOutgoingImage(
 
 enum class GatewayRequestLanePolicy { COALESCE_LATEST, FIFO, REJECT_IF_BUSY }
 
+/**
+ * 远程推送投递通道。APNs 与 FCM 的 token 都由平台层获取并上报，网关只负责
+ * 存储与投递，平台 SDK 不进入 `commonMain`。
+ */
+enum class GatewayPushPlatform(val wireValue: String) {
+    APNS("apns"),
+    FCM("fcm");
+
+    companion object {
+        fun fromWire(value: String?): GatewayPushPlatform? =
+            entries.firstOrNull { it.wireValue == value }
+    }
+}
+
+/**
+ * 一条已注册的推送通道。
+ *
+ * `token` 是设备平台签发的投递地址，网关必须原样保存才能投递，因此它**不能**
+ * 沿用配对 `token` 的"只存 SHA-256 摘要、永不落盘明文"规则（见 mobile-gateway
+ * `lib/devices.js`）。那条不变量仅适用于配对凭据。
+ */
+data class GatewayPushRegistration(
+    val platform: GatewayPushPlatform,
+    val token: String
+) {
+    override fun toString(): String =
+        "GatewayPushRegistration(platform=$platform, token=<redacted>)"
+}
+
 data class GatewayRequest(
     val requestType: String,
     val responseKind: String,
@@ -117,6 +146,32 @@ object GatewayRequests {
 
     fun ping(): GatewayRequest =
         request("ping", "pong", lanePolicy = GatewayRequestLanePolicy.REJECT_IF_BUSY)
+
+    /**
+     * 注册或替换本安装在此网关上的推送投递地址。
+     *
+     * 客户端在拿到 `hello` 之后、重连时都要重发一次：网关可能在客户端不知情
+     * 的情况下被重装（设备文件随实例走），此时旧 token 已失效。
+     */
+    fun registerPush(registration: GatewayPushRegistration): GatewayRequest = request(
+        "push-register", "push-registered",
+        lanePolicy = GatewayRequestLanePolicy.REJECT_IF_BUSY
+    ) {
+        put("platform", registration.platform.wireValue)
+        put("token", registration.token)
+    }
+
+    /**
+     * 注销推送地址。用户在系统设置里关闭通知、或主动退出配对时调用；注销失败
+     * 不应阻塞退出流程，因此调用方可忽略其结果。
+     */
+    fun unregisterPush(registration: GatewayPushRegistration): GatewayRequest = request(
+        "push-unregister", "push-unregistered",
+        lanePolicy = GatewayRequestLanePolicy.REJECT_IF_BUSY
+    ) {
+        put("platform", registration.platform.wireValue)
+        put("token", registration.token)
+    }
 
     fun sessionControl(type: String, sessionId: String): GatewayRequest = request(
         type,

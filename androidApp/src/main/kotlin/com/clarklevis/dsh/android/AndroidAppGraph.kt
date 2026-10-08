@@ -22,6 +22,7 @@ import com.clarklevis.dsh.shared.platform.GatewayNetworkMonitor
 import com.clarklevis.dsh.shared.platform.GatewayPreferences
 import com.clarklevis.dsh.shared.platform.GatewayTransport
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -82,5 +83,15 @@ class AndroidAppGraph(
     var gatewayDisplayName: String = ""
     val stateHolder: AndroidSharedStateHolder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidSharedStateHolder(graph = this)
+    }
+
+    init {
+        // 进程启动时补报：FCM token 在上次运行已落盘，而通道此刻可能仍未建立。
+        AndroidPushRegistrationStore.restoreFromDisk(application)
+        gatewayScope.launch {
+            AndroidPushRegistrationBus.registrations.collect { registration ->
+                stateHolder.submitPushRegistration(registration)
+            }
+        }
     }
 }
