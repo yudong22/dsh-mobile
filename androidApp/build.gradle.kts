@@ -1,6 +1,30 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
+}
+
+/**
+ * Release signing material. The keystore must never be committed, so it is resolved from
+ * outside the repository:
+ *  - CI: `release.yml` decodes the keystore secrets and points `DSH_KEYSTORE_PROPERTIES` at them.
+ *  - Local: `~/dsh-release/keystore.properties` (see `Docs/release-signing.md`).
+ *
+ * Reading these at configuration time is deliberate: Gradle records the file/env-var reads as
+ * configuration-cache inputs, so a keystore appearing later invalidates the cached configuration
+ * instead of silently building an unsigned APK.
+ */
+val releaseKeystoreProperties: Properties? = run {
+    val explicit = System.getenv("DSH_KEYSTORE_PROPERTIES")
+    val candidates = listOfNotNull(
+        explicit?.takeIf { it.isNotBlank() }?.let(::File),
+        rootProject.file("keystore.properties").takeIf { it.isFile },
+        File(System.getProperty("user.home"), "dsh-release/keystore.properties").takeIf { it.isFile }
+    )
+    candidates.firstOrNull()?.let { file ->
+        Properties().apply { file.inputStream().use(::load) }
+    }
 }
 
 android {
@@ -11,9 +35,23 @@ android {
         applicationId = "com.clarklevis.dsh.android"
         minSdk = 24
         targetSdk = 36
-        versionCode = 16
-        versionName = "1.8.0"
+        versionCode = 18
+        versionName = "1.8.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        // Only registered when real material is present. Without it the release variant stays
+        // unsigned (AGP emits `*-unsigned.apk`); `release.yml` then refuses to publish it, so a
+        // debug-signed or unsigned artifact can never be shipped as a Release again.
+        releaseKeystoreProperties?.let { properties ->
+            create("release") {
+                storeFile = File(properties.getProperty("storeFile"))
+                storePassword = properties.getProperty("storePassword")
+                keyAlias = properties.getProperty("keyAlias")
+                keyPassword = properties.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
@@ -23,7 +61,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            // Deliberately not defaulted to the debug config: a debug-signed artifact carries a
+            // per-machine/per-runner random key and cannot be upgraded over.
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

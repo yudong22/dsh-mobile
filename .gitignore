@@ -34,3 +34,11 @@ captures/
 .env
 .env.*
 !.env.example
+
+# Release signing material — must never be committed (see Docs/release-signing.md)
+keystore.properties
+*.jks
+*.keystore
+
+# Local AI-assistant / editor state
+.claude/

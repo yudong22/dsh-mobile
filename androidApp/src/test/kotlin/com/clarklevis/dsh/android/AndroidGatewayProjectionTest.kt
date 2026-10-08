@@ -4,6 +4,7 @@ import com.clarklevis.dsh.shared.facade.SharedMviEvent
 import com.clarklevis.dsh.shared.protocol.GatewayWireDecoder
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -122,26 +123,183 @@ class AndroidGatewayProjectionTest {
     }
 
     /**
-     * 重新握手意味着换了一次连接：旧标记必须清空，否则重连后缓存播种会被永久跳过，
-     * 该会话在 history 帧回来前一直是空屏。
+     * 重新握手清空的是「本连接」标记，而不是内存内容。
+     *
+     * 注意这里**故意不带** `historyFormatVersion`：真实的 hello 可以没有它，而那时
+     * `AssistantStreamState.acceptHello` 会失效该会话。本用例锁定的是「标记被清空」这一事实。
+     * 「内容仍受守卫保护」由下面两个 streaming 用例覆盖。
      */
     @Test
-    fun newHandshakeClearsLiveMarkerSoCacheCanSeedAgain() {
+    fun newHandshakeClearsLiveMarkerButKeepsAuthoritativeContent() {
         val projection = AndroidGatewayProjection()
         projection.selectSession("s")
-        val live = """{"kind":"event","sessionId":"s","seq":1,"time":100,"event":{"type":"user/message","text":"旧连接"}}"""
-        projection.acceptFrame(live, GatewayWireDecoder.decode(live), "s")
+
+        val hello = """{"kind":"hello","historyFormatVersion":1}"""
+        projection.acceptFrame(hello, GatewayWireDecoder.decode(hello), null)
+        val page = """{"kind":"history","sessionId":"s","historyFormatVersion":1,"events":[
+            {"type":"user/message","seq":5,"time":500,"data":{"content":[{"type":"text","text":"基线"}]}}
+        ],"hasMore":false,"bytes":64}"""
+        projection.acceptFrame(page, GatewayWireDecoder.decode(page), "s")
         assertTrue(projection.hasLiveContent("s"))
 
-        val hello = """{"kind":"hello","authenticated":true}"""
+        // 重连：同一 historyFormatVersion，内容保留。
         projection.acceptFrame(hello, GatewayWireDecoder.decode(hello), null)
         assertFalse("新握手后不再持有旧连接的实时标记", projection.hasLiveContent("s"))
+        assertTrue("但内存基线仍在，仍属不得覆盖的权威内容", projection.hasAuthoritativeContent("s"))
+        assertEquals(listOf("基线"), projection.snapshot().conversation.map { it.text })
+        projection.close()
+    }
+
+    /**
+     * **关键回归**：只存在于 conversation store 的内容也必须算权威内容。
+     *
+     * steering（排队）消息经 `conversationStore.replaceSteeringMessages` 进入**已渲染**的会话，
+     * 但**不进 `historyEvents`**（实测此时 `exportConversationCache()` 返回 null）。而
+     * `conversationItems` 只在 conversation 事件真正产生 patch 时才被填充——若
+     * `hasAuthoritativeContent` 只看 `historyEvents` + 连接标记，这类内容在重连（hello 清空
+     * 标记）后就不再受保护，随后的重选会用旧磁盘基线把它覆盖掉。
+     */
+    @Test
+    fun conversationOnlyContentSurvivesReconnectAndStaleCacheSeed() {
+        val projection = AndroidGatewayProjection()
+        projection.selectSession("s")
+        fun accept(raw: String) =
+            projection.acceptFrame(raw, GatewayWireDecoder.decode(raw), "s")
+
+        accept("""{"kind":"session-queue","sessionId":"s","items":[{"id":"q","placement":"steering","message":{"id":"m","content":[{"type":"text","text":"排队消息"}]}}]}""")
+        assertEquals(listOf("排队消息"), projection.snapshot().conversation.map { it.text })
+        assertNull("steering 内容不进 historyEvents", projection.exportConversationCache("s"))
+        assertTrue(
+            "已渲染的会话内容必须被视为权威内容",
+            projection.hasAuthoritativeContent("s")
+        )
+
+        // 重连：标记被清空，但屏幕上仍有内容。
+        accept("""{"kind":"hello"}""")
+        assertFalse(projection.hasLiveContent("s"))
+
+        // 旧磁盘缓存不得覆盖它。
+        projection.restoreConversationCache("s", staleCachePayload)
+        assertEquals(
+            "重连后旧缓存不得覆盖已渲染内容",
+            listOf("排队消息"),
+            projection.snapshot().conversation.map { it.text }
+        )
+        projection.close()
+    }
+
+    /** 重新选中该会话（真实的播种调用点）同样不得覆盖已渲染内容。 */
+    @Test
+    fun reselectingConversationOnlySessionDoesNotReseedFromStaleCache() {
+        val projection = AndroidGatewayProjection()
+        projection.selectSession("s")
+        fun accept(raw: String) =
+            projection.acceptFrame(raw, GatewayWireDecoder.decode(raw), "s")
+        accept("""{"kind":"session-queue","sessionId":"s","items":[{"id":"q","placement":"steering","message":{"id":"m","content":[{"type":"text","text":"排队消息"}]}}]}""")
+        accept("""{"kind":"hello"}""")
+
+        projection.selectSession("s")
+        projection.restoreConversationCache("s", staleCachePayload)
+
+        assertEquals(
+            "重选后也不得被旧缓存覆盖",
+            listOf("排队消息"),
+            projection.snapshot().conversation.map { it.text }
+        )
+        projection.close()
+    }
+
+    private val staleCachePayload = """{"schema":1,"sessionId":"s","lastSequence":1,"events":[
+        {"sessionId":"s","seq":1,"time":1,"event":{"type":"user/message","text":"旧缓存"}}
+    ]}"""
+
+    /**
+     * 权威内容的判定必须让「旧磁盘缓存」输给「内存里已有的内容」。
+     *
+     * 覆盖的是守卫的**效果**而非只是布尔值：带旧基线的缓存被恢复时，内存中更新的内容
+     * 必须原样保留。此前只断言标记位，这个倒退场景不会被发现。
+     */
+    @Test
+    fun staleDiskCacheCannotOverwriteInMemoryContent() {
+        val projection = AndroidGatewayProjection()
+        projection.selectSession("s")
+
+        // 宿主基线：内存里已有「新内容」。
+        val page = """{"kind":"history","sessionId":"s","events":[
+            {"type":"user/message","seq":5,"time":500,"data":{"content":[{"type":"text","text":"新内容"}]}}
+        ],"hasMore":false,"bytes":64}"""
+        projection.acceptFrame(page, GatewayWireDecoder.decode(page), "s")
+        assertEquals(listOf("新内容"), projection.snapshot().conversation.map { it.text })
+
+        // 磁盘上是更早的基线（seq 1）：恢复必须被守卫挡下。
+        val stale = """{"schema":1,"sessionId":"s","lastSequence":1,"events":[
+            {"sessionId":"s","seq":1,"time":100,"event":{"type":"user/message","text":"旧内容"}}
+        ]}"""
+        projection.restoreConversationCache("s", stale)
+
+        assertEquals(
+            "旧缓存不得覆盖内存中更新的内容",
+            listOf("新内容"),
+            projection.snapshot().conversation.map { it.text }
+        )
+        projection.close()
+    }
+
+    /**
+     * 重连（hello 清标记）之后，重新选中该会话同样不能被旧缓存覆盖——
+     * 这正是 `hasAuthoritativeContent` 兼顾「内存内容」的原因。
+     */
+    @Test
+    fun reconnectThenReselectStillProtectsInMemoryContent() {
+        val projection = AndroidGatewayProjection()
+        projection.selectSession("s")
+        val hello = """{"kind":"hello","authenticated":true,"historyFormatVersion":1}"""
+        projection.acceptFrame(hello, GatewayWireDecoder.decode(hello), null)
+        val page = """{"kind":"history","sessionId":"s","historyFormatVersion":1,"events":[
+            {"type":"user/message","seq":5,"time":500,"data":{"content":[{"type":"text","text":"重连前内容"}]}}
+        ],"hasMore":false,"bytes":64}"""
+        projection.acceptFrame(page, GatewayWireDecoder.decode(page), "s")
+
+        // 重连：标记被清空，内容保留。
+        projection.acceptFrame(hello, GatewayWireDecoder.decode(hello), null)
+        assertFalse(projection.hasLiveContent("s"))
+
+        projection.selectSession("s")
+        val stale = """{"schema":1,"sessionId":"s","lastSequence":1,"events":[
+            {"sessionId":"s","seq":1,"time":100,"event":{"type":"user/message","text":"缓存旧内容"}}
+        ]}"""
+        projection.restoreConversationCache("s", stale)
+
+        assertEquals(
+            "重连后重选也不得被旧缓存覆盖",
+            listOf("重连前内容"),
+            projection.snapshot().conversation.map { it.text }
+        )
+        projection.close()
+    }
+
+    /**
+     * 没有权威内容时，缓存仍然必须能正常播种——守卫不能把正常路径也挡掉。
+     */
+    @Test
+    fun diskCacheStillSeedsWhenNoAuthoritativeContentExists() {
+        val projection = AndroidGatewayProjection()
+        projection.selectSession("s")
+        assertFalse(projection.hasAuthoritativeContent("s"))
+
+        val payload = """{"schema":1,"sessionId":"s","lastSequence":1,"events":[
+            {"sessionId":"s","seq":1,"time":100,"event":{"type":"user/message","text":"缓存内容"}}
+        ]}"""
+        projection.restoreConversationCache("s", payload)
+
+        assertEquals(listOf("缓存内容"), projection.snapshot().conversation.map { it.text })
         projection.close()
     }
 
     /** 损坏或不匹配的缓存必须安全忽略，不能污染会话或触发 fail-closed。 */
     @Test
-    fun conversationCacheRejectsCorruptAndForeignPayloads() {        val projection = AndroidGatewayProjection()
+    fun conversationCacheRejectsCorruptAndForeignPayloads() {
+        val projection = AndroidGatewayProjection()
         projection.selectSession("s")
         projection.restoreConversationCache("s", "not-json")
         projection.restoreConversationCache("s", """{"schema":99,"sessionId":"s","lastSequence":1,"events":[]}""")

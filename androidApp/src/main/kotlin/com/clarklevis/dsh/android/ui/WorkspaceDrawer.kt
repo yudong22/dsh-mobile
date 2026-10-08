@@ -252,7 +252,7 @@ internal fun WorkspaceDrawer(
                 )
 
                 LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    modifier = Modifier.weight(1f).fillMaxWidth().testTag("drawer-task-list"),
                     contentPadding = PaddingValues(bottom = 8.dp)
                 ) {
                     if (tasksExpanded) {

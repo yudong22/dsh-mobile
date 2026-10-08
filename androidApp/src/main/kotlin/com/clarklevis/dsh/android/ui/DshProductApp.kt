@@ -91,9 +91,12 @@ internal fun DshProductApp(
     onNotificationRouteOpened: (AndroidNotificationSessionRoute) -> Unit
 ) {
     val navController = rememberNavController()
-    LaunchedEffect(notificationRoute, stateHolder.snapshot.sessions) {
+    // 用派生状态做 key，而不是整个 `snapshot`：后者是单个 mutableStateOf，流式回复只改
+    // conversation 也会让这里每 token 重启一次（并连带让本作用域重组）。
+    val notificationSessions = stateHolder.homeSessions
+    LaunchedEffect(notificationRoute, notificationSessions) {
         val route = notificationRoute ?: return@LaunchedEffect
-        if (stateHolder.snapshot.sessions.none { it.id == route.sessionId }) return@LaunchedEffect
+        if (notificationSessions.none { it.id == route.sessionId }) return@LaunchedEffect
         stateHolder.selectSession(route.sessionId)
         navController.navigate(ROUTE_CONVERSATION) {
             popUpTo(ROUTE_WORKSPACE)
@@ -101,7 +104,6 @@ internal fun DshProductApp(
         }
         onNotificationRouteOpened(route)
     }
-    val backStackEntry by navController.currentBackStackEntryAsState()
     // 用有效配色判断而不是系统主题：用户把「界面」设为浅色而系统为深色时，
     // isSystemInDarkTheme() 会与实际渲染的 palette 分叉，导致状态栏图标与画布对比度反转。
     val dark = dshPalette().isDark
@@ -186,8 +188,7 @@ internal fun DshProductApp(
         composable(ROUTE_PROJECTS) {
             ProjectsTabScreen(
                 stateHolder = stateHolder,
-                onBack = navController::popBackStack,
-                onOpenSession = { sessionId -> stateHolder.selectSession(sessionId) }
+                onBack = navController::popBackStack
             )
         }
     }
@@ -303,8 +304,20 @@ private fun WorkspaceScreen(
     }
     // 当前主机是否为「服务器」类型，决定抽屉设备图标的形态。
     val application = LocalContext.current.applicationContext as? DshAndroidApplication
+    // 从 PackageManager 读版本号，避免像 "v1.8.0" 那样写死后在发版时忘记同步
+    // （buildConfig 未启用，所以没有 BuildConfig.VERSION_NAME 可用）。
+    val context = LocalContext.current
+    val appVersionLabel = remember(context) {
+        runCatching {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            "v${info.versionName}"
+        }.getOrNull()
+    }
     val hosts = application?.hosts
     val activeGatewayIsServer = hosts?.activeProfile?.server == true
+    // 未连接时新建会失败（prepareNewSession 会拒绝），因此这里与抽屉一致地置灰，
+    // 避免用户点了才看到报错。
+    val canStartNewSession = !stateHolder.gatewayState.connection.dshBlocksNetworkActions
     // 抽屉设备下拉的数据源：已配对设备 + 在线/选中态。
     val drawerDevices = remember(hosts?.profiles, hosts?.activeId, hosts?.onlineIds) {
         hosts?.profiles.orEmpty().map { profile ->
@@ -336,7 +349,7 @@ private fun WorkspaceScreen(
         // 重复显示会让人误以为「账户名 = 设备名」。
         accountName = "DeepSeek Harness",
         accountPlan = "标准版",
-        accountQuota = "v1.8.0",
+        accountQuota = appVersionLabel,
         onOpenSession = onOpenSession,
         onNewSession = onNewSession,
         onRenameSession = stateHolder::renameSession,
@@ -390,7 +403,11 @@ private fun WorkspaceScreen(
                             )
                         }
                         Spacer(Modifier.height(14.dp))
-                        DshNewTaskButton(label = "新建会话", onClick = onNewSession)
+                        DshNewTaskButton(
+                            label = "新建会话",
+                            onClick = onNewSession,
+                            enabled = canStartNewSession
+                        )
                     }
                 }
                 item { Spacer(Modifier.height(24.dp)) }
@@ -412,7 +429,6 @@ private fun WorkspaceScreen(
                 )
                 // 菜单锚在底栏左上角区域；向上弹以免超出屏幕底部。
                 GatewayAuthenticationMenuContent(
-                    state = stateHolder.gatewayState,
                     expanded = showAuthMenu,
                     onDismissRequest = { showAuthMenu = false },
                     onScan = {
@@ -568,11 +584,6 @@ internal fun WhaleIcon(
         modifier = modifier,
         colorFilter = ColorFilter.tint(tint)
     )
-}
-
-@Composable
-internal fun GlassCircleButton(iconRes: Int, description: String, onClick: () -> Unit) {
-    DshTonalCircleButton(iconRes = iconRes, description = description, onClick = onClick)
 }
 
 internal fun workspaceScopedSessions(

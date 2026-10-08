@@ -3006,18 +3006,9 @@ private fun CopyButton(text: String) {
 }
 
 @Composable
-private fun MarkdownLikeText(text: String) {
-    DshMarkdownText(text, Modifier.fillMaxWidth())
-}
-
-@Composable
 private fun SmallConnectionDot(state: GatewayConnectionState) {
-    val color = when (state) {
-        GatewayConnectionState.CONNECTED -> DshColors.Success
-        GatewayConnectionState.FAILED -> Color.Red
-        GatewayConnectionState.CONNECTING, GatewayConnectionState.AUTHENTICATING, GatewayConnectionState.WAITING_FOR_NETWORK -> DshColors.Amber
-        else -> Color.Gray
-    }
+    // 与抽屉/顶栏的连接点共用同一套语义取色，避免同一状态在不同页面显示成不同颜色。
+    val color = dshConnectionDotColor(state, dshPalette())
     StatusIndicatorDot(
         color = color,
         modifier = Modifier.size(8.dp),
@@ -3025,12 +3016,7 @@ private fun SmallConnectionDot(state: GatewayConnectionState) {
     )
 }
 
-private fun permissionTitle(value: String?) = when (value) {
-    "read-only" -> "只读"
-    "workspace-write" -> "工作区写入"
-    "danger-full-access" -> "完全访问"
-    else -> "默认权限"
-}
+private fun permissionTitle(value: String?) = runtimePermissionTitle(value)
 
 private fun modelTitle(stateHolder: AndroidSharedStateHolder): String {
     val selection = currentModelSelection(stateHolder)

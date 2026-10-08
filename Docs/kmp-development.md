@@ -24,6 +24,22 @@ androidApp ──> shared <── KMPSharedAdapter <── SwiftUI/AppStore
 - compileSdk / targetSdk 36
 - minSdk 24
 
+### JDK 17 的获取方式
+
+`androidApp` 声明了 `jvmToolchain(17)`，而 `settings.gradle.kts` 启用了
+`foojay-resolver-convention`，因此**不需要**在任何提交进仓库的文件里写死 JDK 路径：
+本机没有 JDK 17 时 Gradle 会自动下载匹配的工具链（需要对 `api.foojay.io` 的网络访问；
+`--offline` 下则必须本机已装 17）。
+
+CI（GitHub Actions）用 `actions/setup-java` 提供 JDK 17，因此是「当前 JVM」路径。
+
+本机若已装 17、但默认 `JAVA_HOME` 指向别的版本，请用环境变量或**个人**的
+`~/.gradle/gradle.properties`（不要提交）指定，例如：
+
+```bash
+export JAVA_HOME=$(/opt/homebrew/bin/brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home
+```
+
 本机 Android SDK 默认位于 `/Users/lichaofan/Library/Android/sdk`。不要提交 `local.properties`；命令行环境没有配置 `ANDROID_HOME` 时，应显式传入：
 
 ```bash

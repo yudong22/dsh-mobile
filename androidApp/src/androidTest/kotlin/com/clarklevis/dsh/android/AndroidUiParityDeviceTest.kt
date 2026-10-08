@@ -2,6 +2,7 @@ package com.clarklevis.dsh.android
 
 import android.view.WindowManager
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -50,10 +51,16 @@ class AndroidUiParityDeviceTest {
         compose.onNode(hasText("新会话默认配置", substring = true)).assertIsDisplayed()
     }
 
+    /**
+     * 未连接时「新建会话」必须置灰而不是可点后报错。
+     *
+     * 此前的版本叫 `offlineNewSessionOpensComposer...`，期望未连接也能打开输入框；
+     * 但 `prepareNewSession()` 一直要求 CONNECTED，两者矛盾导致该测试长期失败。
+     * 现在统一为「未连接即置灰」，并断言不会再弹出内部错误文案。
+     */
     @Test
-    fun offlineNewSessionOpensComposerWithoutShowingAnInternalSubscribeError() {
-        compose.onNode(hasText("新建会话")).performClick()
-        compose.onNode(hasTestTag("composer-input")).assertIsDisplayed()
+    fun offlineNewSessionIsDisabledInsteadOfFailing() {
+        compose.onNode(hasTestTag("new-task-button")).assertIsNotEnabled()
         compose.onNode(hasText("unsubscribe: not-connected")).assertDoesNotExist()
     }
 
@@ -66,13 +73,21 @@ class AndroidUiParityDeviceTest {
 
     /**
      * 首页任务列表已移除，会话列表与重命名/删除入口改由抽屉承载。
-     * 这里锁定抽屉确实渲染了「任务」区块，避免它再次退化成纯展示列表。
+     * 这里锁定抽屉确实渲染了「任务 (n)」区块与其中的会话列表容器，
+     * 避免它再次退化成纯展示列表。
+     *
+     * 注意 `hasText` 默认是**精确匹配**，而该区块渲染的是 `任务 (0)` 这种带计数的文案，
+     * 所以这里必须断言 testTag（或带 substring = true），不能写成 `hasText("任务")`——
+     * 那样只会命中底栏的同名 Tab，删掉整个区块测试也照样通过。
      */
     @Test
     fun drawerTaskSectionHostsTheSessionList() {
         compose.onNode(hasContentDescription("打开侧边栏")).performClick()
         compose.onNode(hasTestTag("drawer-new-task")).assertIsDisplayed()
-        compose.onNode(hasText("任务")).assertIsDisplayed()
+        compose.onNode(hasTestTag("drawer-section-任务")).assertIsDisplayed()
+        compose.onNode(hasText("任务 (", substring = true)).assertIsDisplayed()
+        // 会话列表容器：有会话时是 drawer-session-<id>，空态时是「暂无会话」占位。
+        compose.onNode(hasTestTag("drawer-task-list")).assertIsDisplayed()
     }
 
     /**

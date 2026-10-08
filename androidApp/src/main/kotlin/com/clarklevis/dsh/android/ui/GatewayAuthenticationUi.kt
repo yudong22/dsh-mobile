@@ -91,29 +91,6 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import kotlinx.coroutines.launch
 
-@Composable
-internal fun GatewayAuthenticationMenu(
-    state: GatewayRuntimeState,
-    onScan: () -> Unit,
-    onManualEntry: () -> Unit
-) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    Box {
-        GlassCircleButton(
-            iconRes = R.drawable.ic_gateway_auth,
-            description = "设备认证，${gatewayConnectionTitle(state.connection)}",
-            onClick = { expanded = true }
-        )
-        GatewayAuthenticationMenuContent(
-            state = state,
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            onScan = onScan,
-            onManualEntry = onManualEntry
-        )
-    }
-}
-
 /**
  * 认证菜单的内容部分，与触发按钮解耦。
  *
@@ -122,7 +99,6 @@ internal fun GatewayAuthenticationMenu(
  */
 @Composable
 internal fun GatewayAuthenticationMenuContent(
-    state: GatewayRuntimeState,
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     onScan: () -> Unit,

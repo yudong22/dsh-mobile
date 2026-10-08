@@ -791,13 +791,16 @@ class AndroidSharedStateHolder(
     /**
      * 用缓存播种该会话的对话内容。
      *
-     * 判据必须是「该会话本进程是否已有实时内容」，而不是「当前选中的会话是否有内容」——
-     * 调用点上 `snapshot.selectedSessionId` 仍是**上一个**会话（投影的 selectSession 尚未
-     * 执行），拿它比较会退化成「上一个会话有内容就跳过恢复」，语义完全错位。
+     * 判据是「该会话是否已有不得被覆盖的权威内容」（本连接的实时帧，或内存里已有的事件基线），
+     * 而不是「当前选中的会话是否有内容」——调用点上 `snapshot.selectedSessionId` 仍是**上一个**
+     * 会话（投影的 selectSession 尚未执行），拿它比较会退化成「上一个会话有内容就跳过恢复」。
+     *
+     * 这里只做快速路径判断；真正的原子性由 `restoreConversationCache` 在 `mutationLock` 内
+     * 二次校验保证（本函数与写入之间隔着一次挂起的磁盘读取）。
      */
     private suspend fun restoreConversationFromCacheIfAvailable(sessionId: String) {
         val appGraph = graph ?: return
-        if (projectionActor.hasLiveContent(sessionId)) return
+        if (projectionActor.hasAuthoritativeContent(sessionId)) return
         val payload = runCatching { appGraph.conversationCache.read(sessionId) }.getOrNull() ?: return
         // actor 内部经 uiDispatcher 发布 snapshot，这里不再重复写 Compose state。
         runCatching { projectionActor.restoreConversationCache(sessionId, payload) }
@@ -982,36 +985,30 @@ class AndroidSharedStateHolder(
      * `snapshot` 是单个 `mutableStateOf<SharedMobileSnapshot>`，失效粒度是**整个对象**：
      * 流式回复只改 `conversation`，也会让所有读过 `snapshot` 的作用域（含整个首页）失效重组。
      * `derivedStateOf` 会在上游变化后重算自身，若结果与上次相等则**不向下传播**失效——
-     * 首页因此只在这三个字段真正变化时才重组。
+     * 首页因此只在这些字段真正变化时才重组。
      *
-     * 只在 Main 上读（这些 getter 都被 Composable 调用），依赖读取处于正确的快照上下文。
+     * 这些 getter 会在 Main（Composable）与 gateway dispatcher 两处被读，因此其实现必须是
+     * **线程安全**的：`derivedStateOf` 读的是 Compose 快照状态，任意线程读都合法；而此前的
+     * 实现用了一个普通 `LinkedHashMap` 做缓存，会在这里被并发读写（见 availableWorkspaces）。
      */
     val homeSessions: List<SessionSummary> by derivedStateOf { snapshot.sessions }
-
-    val homeSearchResultSessionIds: List<String> by derivedStateOf { snapshot.searchResultSessionIds }
 
     private val rawWorkspaces: List<GatewayWorkspace> by derivedStateOf { snapshot.workspaces }
 
     /**
-     * 工作区列表。`recentlyCreatedWorkspace` 存在时才需要拼接，此时结果也必须**缓存**：
-     * 直接返回新 list 会让引用相等失效，使 Compose 里以它为 key 的 `remember`
-     * 每次重组都重算（首页会话过滤因此反复跑）。
+     * 工作区列表：网关返回的列表 + 「刚创建但宿主列表还没回来」的那个工作区。
+     *
+     * 用 `derivedStateOf` 而不是手写缓存有两个理由：
+     *  1. 它是 Compose 快照状态，Main（Composable）与 gateway dispatcher（`sendMessage` 读
+     *     `activeWorkspace`）可以安全并发读取；此前那个 `LinkedHashMap` 缓存做不到这一点。
+     *  2. 上游未变化时不会重算，且结果与上次**结构相等**时不向下传播失效——`remember` 的 key
+     *     用 `equals` 比较（`GatewayWorkspace` 是 data class），所以不必担心列表被重建。
      */
-    val availableWorkspaces: List<GatewayWorkspace>
-        get() {
-            val created = recentlyCreatedWorkspace ?: return rawWorkspaces
-            if (rawWorkspaces.any { it.workspaceId == created.workspaceId }) return rawWorkspaces
-            return appendedWorkspacesCache.getOrPut(created.workspaceId to rawWorkspaces) {
-                rawWorkspaces + created
-            }
-        }
-
-    private val appendedWorkspacesCache =
-        object : LinkedHashMap<Pair<String, List<GatewayWorkspace>>, List<GatewayWorkspace>>(2, 0.75f, true) {
-            override fun removeEldestEntry(
-                eldest: MutableMap.MutableEntry<Pair<String, List<GatewayWorkspace>>, List<GatewayWorkspace>>
-            ): Boolean = size > 4
-        }
+    val availableWorkspaces: List<GatewayWorkspace> by derivedStateOf {
+        val created = recentlyCreatedWorkspace ?: return@derivedStateOf snapshot.workspaces
+        if (snapshot.workspaces.any { it.workspaceId == created.workspaceId }) snapshot.workspaces
+        else snapshot.workspaces + created
+    }
 
     val activeWorkspace: GatewayWorkspace?
         get() {
@@ -1687,6 +1684,9 @@ class AndroidSharedStateHolder(
             applySessionAgentPresetTransition(sessionAgentPresetStore.beginMessage())
         }
         pendingMessageSubmission = submission
+        // 在 Main 上取快照，随请求一起带进 gateway scope：`activeWorkspace` 读的是 Compose
+        // 状态，不应在 gateway dispatcher 上求值（与 submission 里的其它值同一模式）。
+        val workspaceId = activeWorkspace?.workspaceId
         appGraph.diagnostics.intent(
             GatewayDiagnosticAction.SEND_MESSAGE,
             hasSession = submission.sessionId != null,
@@ -1721,7 +1721,7 @@ class AndroidSharedStateHolder(
                     text = submission.draft,
                     images = submission.images.map(AndroidPreparedImage::outgoing),
                     sessionId = submission.sessionId,
-                    workspaceId = activeWorkspace?.workspaceId,
+                    workspaceId = workspaceId,
                     clientTimeZone = TimeZone.getDefault().id,
                     mode = mode
                 )

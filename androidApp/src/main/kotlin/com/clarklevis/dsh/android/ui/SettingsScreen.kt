@@ -885,12 +885,8 @@ private fun selectedModel(holder: AndroidSharedStateHolder): String {
     return effortName?.let { "$base · $it" } ?: base
 }
 
-private fun permissionName(value: String?) = when (value) {
-    "read-only" -> "只读"
-    "workspace-write" -> "工作区写入"
-    "danger-full-access" -> "完全访问"
-    else -> "未读取"
-}
+/** 权限文案统一走 [runtimePermissionTitle]，避免同一取值在不同页面显示成不同字符串。 */
+private fun permissionName(value: String?) = runtimePermissionTitle(value)
 
 private fun connectionLabel(holder: AndroidSharedStateHolder) = when (holder.gatewayState.connection) {
     GatewayConnectionState.CONNECTED -> "已连接"

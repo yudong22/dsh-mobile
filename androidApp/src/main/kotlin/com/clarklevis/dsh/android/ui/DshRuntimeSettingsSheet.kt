@@ -22,12 +22,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,11 +64,18 @@ internal fun runtimeHeaderSubtitle(deviceLabel: String?, workspaceLabel: String?
         .filter(String::isNotEmpty)
         .joinToString("  |  ")
 
-/** 权限模式的兜底中文名（网关未返回 name 时使用）。 */
+/**
+ * 权限模式的兜底中文名（网关未返回 name 时使用）。
+ *
+ * 这是**唯一**的权限文案来源：设置页与对话页此前各自抄了一份，`else` 分支还互相漂移
+ * （"未读取" / "默认权限" / "默认"）。网关实际会返回 `ask`，因此它也需要本地化，
+ * 而不是把英文原样显示出来。调用方若已拿到 `GatewayPermissionOption.name`，应优先用它。
+ */
 internal fun runtimePermissionTitle(value: String?): String = when (value) {
     "read-only" -> "只读"
     "workspace-write" -> "工作区写入"
     "danger-full-access" -> "完全访问"
+    "ask" -> "每次询问"
     null, "" -> "默认"
     else -> value
 }
@@ -95,7 +104,8 @@ internal fun RuntimeSettingsSheet(
 ) {
     val palette = dshPalette()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var page by remember { mutableStateOf(RuntimeSettingsPage.MAIN) }
+    // saveable：面板停留在二级页时旋转屏幕，子页不应回到主层（面板本身由 M3 的 SheetState 保留）。
+    var page by rememberSaveable { mutableStateOf(RuntimeSettingsPage.MAIN) }
     val context = LocalContext.current
     val hosts = (context.applicationContext as? DshAndroidApplication)?.hosts
 
@@ -112,15 +122,26 @@ internal fun RuntimeSettingsSheet(
         .firstOrNull { it.workspaceId == stateHolder.selectedWorkspaceId }?.title
         ?: if (stateHolder.isUngroupedWorkspaceSelected) "未分组" else workspaceLabel
 
-    BackHandler(enabled = page != RuntimeSettingsPage.MAIN) { page = RuntimeSettingsPage.MAIN }
-
+    // `ModalBottomSheet` 渲染在它自己的 `ComponentDialog` 窗口里，并通过
+    // `ModalBottomSheetDialogWrapper` 安装自己的返回回调。因此两件事缺一不可：
+    //  1. `shouldDismissOnBackPress = false` —— 否则 M3 的默认回调会抢在返回键之前
+    //     直接把整个面板关掉，二级页永远回不到主层；
+    //  2. `BackHandler` 必须写在 `ModalBottomSheet` 的 content **内部** —— 只有 content
+    //     才处于该 dialog 窗口的 composition 中，写在外部注册到的是 Activity 的
+    //     dispatcher，面板打开时根本不会被调用。
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         dragHandle = null,
         containerColor = palette.surface,
-        contentColor = palette.textPrimary
+        contentColor = palette.textPrimary,
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false)
     ) {
+        // 二级页：返回键先回到主层；主层：返回键关闭面板。因为上面关掉了 M3 的
+        // shouldDismissOnBackPress，主层的关闭行为必须由这里接管，否则返回键会失效。
+        BackHandler {
+            if (page == RuntimeSettingsPage.MAIN) onDismiss() else page = RuntimeSettingsPage.MAIN
+        }
         Column(
             Modifier.fillMaxWidth().padding(bottom = 20.dp).testTag("runtime-settings-sheet")
         ) {

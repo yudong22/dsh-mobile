@@ -83,11 +83,18 @@ MaterialTheme.colorScheme 由同一份 palette 映射，禁止在浅色背景上
 `if (isSystemInDarkTheme())` 只允许用于与有效配色无关的场景——凡需判断明暗（状态栏、
 毛玻璃面板）必须用 `dshPalette().isDark`，否则「界面」显式设浅色而系统为深色时会分叉。
 
-Android 顶层结构：底部五标签（任务 / 专家 / 资料库 / 定时任务 / 项目）为主导航，
-抽屉（`ui/WorkspaceDrawer.kt`）承载品牌、云端、新建任务、任务列表与账户卡；
-点击首页顶部标题区域弹出「任务运行设置」面板（`ui/DshRuntimeSettingsSheet.kt`），
-在设备（Gateway 主机）/ 工作空间 / 权限模式之间切换，均由既有 StateHolder Intent 驱动，
-不引入新的业务状态源。
+Android 顶层结构：底部五标签（任务 / 项目 / 定时任务 / 设置 / 扫码）为主导航
+（`ui/DshBottomNavigation.kt` 的 `DshTab`；「专家」入口改由设置页的 Agent 预设承担，
+「资料库」已不再提供）；抽屉（`ui/WorkspaceDrawer.kt`）承载品牌、设备下拉、新建任务、
+`任务 (n)` / `空间 (n)` 区块与账户卡；点击首页顶部标题区域弹出「任务运行设置」面板
+（`ui/DshRuntimeSettingsSheet.kt`），在设备（Gateway 主机）/ 工作空间 / 权限模式之间切换，
+均由既有 StateHolder Intent 驱动，不引入新的业务状态源。
+
+导航守卫约定（易错点）：`ModalBottomSheet` 渲染在独立的 dialog 窗口中，因此面板内的
+返回键处理必须写在 sheet 的 content **内部**，并同时设置
+`ModalBottomSheetProperties(shouldDismissOnBackPress = false)`；写在 content 之外只会
+注册到 Activity 的 dispatcher，面板打开时不会被调用。`LocalDshPalette` 与
+`LocalAppearanceSettings` 一样默认抛错而不是静默退回浅色。
 
 ## 5. 关键 Use Case
 

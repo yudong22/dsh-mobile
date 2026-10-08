@@ -50,12 +50,18 @@ import com.clarklevis.dsh.shared.protocol.GatewayWorkspace
 @Composable
 internal fun ProjectsTabScreen(
     stateHolder: AndroidSharedStateHolder,
-    onBack: () -> Unit,
-    onOpenSession: (String) -> Unit
+    onBack: () -> Unit
 ) {
     val palette = dshPalette()
     var showDirectoryBrowser by remember { mutableStateOf(false) }
     val workspaces = stateHolder.availableWorkspaces
+    // 用派生状态读取，避免整个「项目」页因 conversation 的每 token 发布会话而重组。
+    val sessions = stateHolder.homeSessions
+    val ungroupedSessionCount = remember(sessions, workspaces) {
+        sessions.count { session ->
+            session.isVisibleInHistory && workspaces.none { session.id in it.sessionIds }
+        }
+    }
     LaunchedEffect(Unit) { stateHolder.refreshProductState() }
     Scaffold(
         containerColor = palette.canvas,
@@ -77,7 +83,7 @@ internal fun ProjectsTabScreen(
             item {
                 ProjectCard(
                     title = "未分组",
-                    detail = "${stateHolder.snapshot.sessions.count { it.isVisibleInHistory && workspaces.none { w -> it.id in w.sessionIds } }} 个未归属会话",
+                    detail = "$ungroupedSessionCount 个未归属会话",
                     selected = stateHolder.isUngroupedWorkspaceSelected,
                     onClick = { stateHolder.selectWorkspace(AndroidSharedStateHolder.UNGROUPED_WORKSPACE_ID) }
                 )

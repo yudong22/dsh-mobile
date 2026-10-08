@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -41,6 +42,12 @@ internal object DshColors {
     val Amber = Color(0xFFFFAD1F)
     val Success = Color(0xFF2EB85C)
     val Danger = Color(0xFFFF3B30)
+    /** 浅色下当作**正文颜色**使用的错误红：`Danger` 在白底只有 3.55:1，不满足正文对比度。 */
+    val DangerLight = Color(0xFFB3261E)
+    /** 深色画布上的错误红：`Danger` 在 `#1C1C1E` 上为 4.80:1。 */
+    val DangerDark = Color(0xFFFF6B63)
+    /** 深色画布上的次级强调色；`Purple` 在深色底上只有 3.18:1。 */
+    val PurpleDark = Color(0xFFB69BFF)
 
     // 旧深色命名保留给仍在引用的实现，取值改为新体系下的等价色。
     val Navy = Color(0xFF06172B)
@@ -138,7 +145,14 @@ internal object DshPalettes {
     )
 }
 
-internal val LocalDshPalette = staticCompositionLocalOf { DshPalettes.Light }
+/**
+ * 与 `LocalAppearanceSettings` 一样默认报错：静默退回浅色会让「深色模式下渲染成浅色」
+ * 这类问题毫无征兆地出现（例如新增的 Dialog/Popup/测试忘了包 `DshTheme`）。
+ * 生产路径上唯一提供者是 `DshTheme` 自身。
+ */
+internal val LocalDshPalette = staticCompositionLocalOf<DshPalette> {
+    error("DshPalette must be provided by DshTheme")
+}
 
 /** 当前有效配色。ViewModel/纯函数请显式传参，Composable 内直接调用。 */
 @Composable
@@ -166,35 +180,43 @@ internal fun StatusIndicatorDot(
     Box(decoratedModifier.background(color, CircleShape))
 }
 
-private fun paletteColorScheme(palette: DshPalette) = if (palette.isDark) {
-    darkColorScheme(
+/**
+ * 把语义 token 映射到 Material3 的角色。
+ *
+ * 注意 `onPrimary`/`error`/`secondary` 都**按明暗分档**，不能两个分支写同一个字面量：
+ * 深色下 `primary` 是浅蓝 `#7EA8FF`，配白字只有 2.35:1（远低于 4.5:1 正文下限），
+ * 必须用深色前景（`palette.surface` → 7.24:1）；`error` 用 `#FF3B30` 在白底/浅底上
+ * 只有 3.3~3.6:1，而它被当作**正文颜色**用在大量错误文案上，因此浅色下改用 M3 的
+ * `#B3261E`（6.54:1），深色下保留亮红（4.80:1）。
+ */
+private fun paletteColorScheme(palette: DshPalette): ColorScheme {
+    val onPrimary = if (palette.isDark) palette.surface else Color.White
+    // 深色下沿用 HEAD 的亮紫（3.18:1 → 7.39:1），避免深色模式可读性倒退。
+    val secondary = if (palette.isDark) DshColors.PurpleDark else DshColors.Purple
+    val error = if (palette.isDark) DshColors.DangerDark else DshColors.DangerLight
+    val base = if (palette.isDark) darkColorScheme() else lightColorScheme()
+    return base.copy(
         primary = palette.primary,
-        onPrimary = Color.White,
-        secondary = DshColors.Purple,
+        onPrimary = onPrimary,
+        secondary = secondary,
+        onSecondary = onPrimary,
         background = palette.canvas,
         onBackground = palette.textPrimary,
         surface = palette.surface,
         onSurface = palette.textPrimary,
         surfaceVariant = palette.surfaceMuted,
         onSurfaceVariant = palette.textSecondary,
+        // 未显式设置的容器角色会退回 M3 基线（浅紫灰），与浅色卡片体系冲突——
+        // 例如未用 DshAlertDialog 的原生 AlertDialog 会拿到 surfaceContainerHigh。
+        surfaceContainerHigh = palette.surfaceMuted,
+        surfaceContainerHighest = palette.surfaceMuted,
+        surfaceContainer = palette.surface,
+        surfaceContainerLow = palette.surface,
+        surfaceContainerLowest = palette.surface,
         outline = palette.border,
         outlineVariant = palette.divider,
-        error = DshColors.Danger
-    )
-} else {
-    lightColorScheme(
-        primary = palette.primary,
-        onPrimary = Color.White,
-        secondary = DshColors.Purple,
-        background = palette.canvas,
-        onBackground = palette.textPrimary,
-        surface = palette.surface,
-        onSurface = palette.textPrimary,
-        surfaceVariant = palette.surfaceMuted,
-        onSurfaceVariant = palette.textSecondary,
-        outline = palette.border,
-        outlineVariant = palette.divider,
-        error = DshColors.Danger
+        error = error,
+        onError = onPrimary
     )
 }
 

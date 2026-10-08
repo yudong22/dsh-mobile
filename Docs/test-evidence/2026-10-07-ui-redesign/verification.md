@@ -15,13 +15,16 @@
 
 | 层 | 内容 |
 | --- | --- |
-| 配色底座 | `ui/DshTheme.kt`：`DshPalette` + `LocalDshPalette` + `dshPalette()`，浅/深各一套语义 token |
-| 首页 | `ui/DshProductApp.kt`：品牌头（两行标题 + `›`）、工作区卡、新建任务胶囊、任务区块、任务列表 |
-| 底部导航 | `ui/DshBottomNavigation.kt`：任务 / 专家 / 资料库 / 定时任务 / 项目 |
-| 抽屉 | `ui/WorkspaceDrawer.kt`：字标 → 云端 → 新建任务 → 任务 → 次级入口 → 账户卡 |
-| 顶部弹层 | `ui/DshRuntimeSettingsSheet.kt`：设备 / 工作空间 / 权限模式，可下钻 |
-| 标签页 | `ui/DshTabScreens.kt`：资料库（工作区文件）、项目（工作区列表） |
-| 任务列表 | `ui/DshTaskList.kt`：标题 + 次级灰字 + 细分隔线 |
+| 配色底座 | `ui/DshTheme.kt`：`DshPalette` + `LocalDshPalette` + `dshPalette()`，浅/深各一套语义 token；`onPrimary`/`error`/`secondary` 按明暗分档以满足对比度 |
+| 首页 | `ui/DshProductApp.kt`：品牌头（两行标题 + `›`）、工作区卡、新建会话胶囊（未连接即置灰）、任务区块 |
+| 底部导航 | `ui/DshBottomNavigation.kt`：任务 / 项目 / 定时任务 / 设置 / 扫码（`DshTab`） |
+| 抽屉 | `ui/WorkspaceDrawer.kt`：字标 → 设备下拉 → 新建任务 → `任务 (n)` → `空间 (n)` → 次级入口 → 账户卡 |
+| 顶部弹层 | `ui/DshRuntimeSettingsSheet.kt`：设备 / 工作空间 / 权限模式，可下钻；返回键在主层关闭、二级页回主层 |
+| 标签页 | `ui/DshTabScreens.kt`：项目（工作区列表） |
+| 连接状态 | `ui/DshConnectionStateUi.kt`：7 个原始状态 → 4 类展示语义（纯函数，有单测） |
+
+> 说明：首页的 hero 标题、会话搜索框与首页任务列表已移除（会话列表改由抽屉承载）；
+> 「专家」「资料库」两个底栏入口已移除，`DshTaskList.kt` 因此整文件删除。
 
 ### 1.1 从截图反推的设计 token
 
@@ -55,7 +58,9 @@
 - 系统返回键在二级页回到主层（`BackHandler`）。
 
 纯函数 `runtimeHeaderSubtitle()` / `runtimePermissionTitle()` 有单测覆盖
-（`androidApp/src/test/.../ui/RuntimeSettingsHeaderTest.kt`，7 个断言）。
+（`androidApp/src/test/.../ui/RuntimeSettingsHeaderTest.kt`，4 个用例 / 13 个断言）。
+`runtimePermissionTitle()` 现在是权限文案的**唯一**来源（设置页与对话页原先各抄了一份，
+`else` 分支互相漂移），并补齐了网关实际会返回的 `ask` → 「每次询问」。
 
 ---
 
@@ -72,15 +77,18 @@
 | 任务 | 结果 |
 | --- | --- |
 | `:shared:testAndroidHostTest` | **BUILD SUCCESSFUL**，225 tests / 0 failures / 0 errors |
-| `:androidApp:testDebugUnitTest` | **BUILD SUCCESSFUL**，114 tests / 0 failures / 0 errors |
-| `:androidApp:lintDebug` | **BUILD SUCCESSFUL**，27 issue（24 Warning + 3 Hint，**0 Error**） |
+| `:androidApp:testDebugUnitTest` | **BUILD SUCCESSFUL**，125 tests / 0 failures / 0 errors |
+| `:androidApp:lintDebug` | **BUILD SUCCESSFUL**，28 issue（25 Warning + 3 Hint，**0 Error**） |
 | `:androidApp:assembleDebug` | **BUILD SUCCESSFUL** |
+| `:androidApp:assembleRelease` | **BUILD SUCCESSFUL**（release 签名，见 `Docs/release-signing.md`） |
 | `:androidApp:compileDebugAndroidTestKotlin` | **BUILD SUCCESSFUL** |
 | `git diff --check` | 通过（无空白错误） |
 
-Lint 的 27 条经逐条核对**均为既有项**，本轮未新增：`ModifierParameter` 2 条位于
-`GatewaySwitcherUi.kt:595`、`SessionStatusUi.kt:130`（在 HEAD 上已存在）；
-其余为 `UnusedResources` / `UseKtx` / `VectorPath` / `OldTargetApi` 等历史告警。
+> 数字以 v1.8.2 收尾时的实测为准（androidApp 单测从 114 → 123：新增
+> `DshConnectionStateUiTest` 6 条与缓存守卫回归测试 3 条）。Lint 的 28 条均为既有项，
+> 本轮未新增：`ModifierParameter` 2 条位于 `GatewaySwitcherUi.kt:595`、`SessionStatusUi.kt:130`
+> （HEAD 上已存在）；其余为 `UnusedResources` / `UseKtx` / `VectorPath` / `OldTargetApi` 等历史告警。
+> 本轮新增的 `ic_cloud_outline` 与因删除 `DshSearchField` 而失效的 `ic_search` 均已删除。
 
 ### 3.1 设备 instrumentation
 
@@ -167,29 +175,56 @@ ANDROID_SERIAL=emulator-5554 ./gradlew :androidApp:connectedDebugAndroidTest
 
 ---
 
-## 6. 工作区并发写入声明（重要）
+## 6. v1.8.2 复审修复（本轮）
 
-本轮验证期间检测到**同一工作区存在另一个并发写入者**（另有 `dsh` 实例在运行、
-Android Studio 亦在打开该工程）。以下改动**不属于本轮 UI 改版、非本会话所为**，
-以 `path:line` 列出以便区分责任：
+针对一次独立的只读代码复审结论逐项修复；每项都给出了可复现的证据。
 
-| 文件 | 改动 | 内容 |
-| --- | --- | --- |
-| `androidApp/src/main/kotlin/.../AndroidGatewayProjection.kt` | +21 | 新增 `hasLiveContent(sessionId)` 与 `liveSessionIds` 标记 |
-| `androidApp/src/main/kotlin/.../AndroidProjectionActor.kt` | +8 | 转发 `hasLiveContent` |
-| `androidApp/src/main/kotlin/.../AndroidSharedStateHolder.kt` | +26/−9 | 缓存播种前检查 `hasLiveContent` |
-| `androidApp/src/test/kotlin/.../AndroidGatewayProjectionTest.kt` | +67/−2 | 对应新增实时标记单测 |
+| # | 级别 | 问题 | 修复 |
+| --- | --- | --- | --- |
+| 1 | blocker | `availableWorkspaces` 用普通 `LinkedHashMap` 做缓存，而该 getter 会在 Main（Composable）与 gateway dispatcher（`sendMessage`）两处被读 → 并发读写非线程安全 | 改为 `derivedStateOf`（Compose 快照状态，跨线程读安全）；并把 `activeWorkspace` 的读取提前到 Main，随请求带入 gateway scope |
+| 2 | blocker | `RuntimeSettingsSheet` 的 `BackHandler` 写在 `ModalBottomSheet` **外部**：M3 的 sheet 渲染在独立 dialog 窗口并自带返回回调，二级页按返回键会关闭整个面板（文档却称回到主层） | `shouldDismissOnBackPress = false`，并把 `BackHandler` 移入 sheet content 内；主层返回键由它接管关闭。`page` 改用 `rememberSaveable` |
+| 3 | blocker | 发版 APK 用 `signingConfigs.debug` 签名，CI 每次生成随机 debug keystore（实测 v1.8.0 签名为 `f4cf5893…`，与本机 `a05c08c5…` 不同）→ 用户无法覆盖升级 | 新增 secret 驱动的 `release` 签名配置；无签名材料时产物为 unsigned，`release.yml` 校验签名并拒绝发布非项目密钥/ debug 签名产物（`Docs/release-signing.md`） |
+| 4 | should-fix | 缓存播种是 TOCTOU：`hasLiveContent` 检查与 `restoreConversationCache` 写入之间隔着一次挂起磁盘读，期间到达的实时帧会被旧基线覆盖 | `restoreConversationCache` 在锁内二次校验 |
+| 5 | should-fix | `hello` 清空实时标记但**保留内存内容**，重连后重新选中该会话会用旧磁盘基线覆盖内存中更新的内容 | 新增 `hasAuthoritativeContent()` = 实时标记 **或** 内存已有事件基线 **或** 已渲染的会话内容（见第 15 项） |
+| 6 | should-fix | 被拒绝的 history/live 帧也会置位实时标记，导致该会话缓存播种被永久跳过 | 标记改到接受判定之后，且 history 仅在 `events` 非空时置位 |
+| 7 | should-fix | 首页「新建会话」未传 `enabled`（抽屉传了）→ 未连接时仍可点，点了才报错；新设备用例 `assertIsNotEnabled()` 必然失败 | 传 `enabled = !connection.dshBlocksNetworkActions` |
+| 8 | should-fix | `drawerTaskSectionHostsTheSessionList` 用 `hasText("任务")`（默认精确匹配），而区块渲染的是 `任务 (0)`，只会命中底栏同名 Tab → 删掉整个区块测试仍通过 | 改断言 `drawer-section-任务`、`任务 (`（substring）与新增的 `drawer-task-list` |
+| 9 | should-fix | 构建可移植性：`gradle.properties` 写死 `/opt/homebrew/Cellar/openjdk@17/17.0.19/...`，同时注释掉 foojay 解析器（两者互为因果，换机/`brew upgrade` 即挂） | 删除写死的路径、恢复 foojay 自动下载工具链；官方仓库置于镜像之前；wrapper 回到官方 distribution URL；在 `Docs/kmp-development.md` 说明 JDK 获取方式 |
+| 10 | should-fix | 深色下 `onPrimary` 用白色叠 `#7EA8FF` 仅 2.35:1；`error` 作正文色仅 3.3~3.6:1；深色 `secondary` 由 HEAD 的 7.39:1 退到 3.18:1；未设置的 `surfaceContainer*` 让原生 `AlertDialog` 退回 M3 紫灰 | 按明暗分档 `onPrimary`/`error`/`secondary`，并显式映射 `surfaceContainer*` |
+| 11 | should-fix | `LocalDshPalette` 默认静默返回浅色 | 与 `LocalAppearanceSettings` 一致改为 `error(...)` |
+| 12 | minor | 派生状态收益被 `snapshot.sessions` 直读抵消（`DshProductApp` 的 `LaunchedEffect`、`ProjectsTabScreen`） | 改用 `homeSessions` |
+| 13 | minor | 死代码：`DshTaskList.kt`（整文件）、`DshSearchField`、`GatewayAuthenticationMenu`、`GlassCircleButton`、`MarkdownLikeText`、`homeSearchResultSessionIds`、`backStackEntry`、未使用的 `onOpenSession`/`state` 参数、重复的 `Image` import | 全部删除；连带删除因此失效的 `ic_cloud_outline.xml` 与 `ic_search.xml` |
+| 14 | — | `SmallConnectionDot` 用 `Color.Red`/`Color.Gray`，与抽屉/顶栏同语义状态不同色 | 统一走 `dshConnectionDotColor(state, dshPalette())` |
+| 15 | **blocker** | 第 5 项的判据本身不够：`historyEvents` 只是「可落盘的规范化事件」缓冲，而 **steering（排队）消息等只进 `conversationStore`**，不进 `historyEvents`（实测此时 `exportConversationCache()` 为 null）。于是重连后 `hasAuthoritativeContent` 仍返回 false，旧磁盘基线照样覆盖已渲染内容 | 判据补上 `conversationItems`（已渲染内容）这一路；并加两条 streaming/steering 回归用例，做了变异验证 |
 
-判定依据：这三个主源码文件**从未分配给任何 teammate，也未由 Lead 编辑**
-（Lead 的 write scope 为 `DshTheme.kt`、`DshProductApp.kt`、`WorkspaceDrawer.kt`、
-`DshLiquidGlass.kt`、`DshBottomNavigation.kt`、`DshTabScreens.kt`、`DshTaskList.kt`、
-`DshRuntimeSettingsSheet.kt` 与新增 drawable/测试），其内容是关于「缓存播种不得标记为
-实时内容」的逻辑，与 UI 改版无关。
+### 6.1 本轮新增的回归测试
 
-对最终门禁的影响：在上述并发改动**已存在**的树上一个 `--rerun-tasks` 全量重跑
-（`:androidApp:testDebugUnitTest` + `:androidApp:assembleDebug`）仍然 **BUILD SUCCESSFUL**，
-114 个单测 0 失败，说明两批改动互不冲突。**但这批改动未经本会话审查，不应视为本轮的
-交付内容**；本轮 UI 结论只对第 1~5 节列出的文件负责。
+`:androidApp:testDebugUnitTest` 从 114 → **125**（新增 11 条：`DshConnectionStateUiTest` 6 条
++ 本轮 5 条）：
+
+- `staleDiskCacheCannotOverwriteInMemoryContent` —— 断言守卫的**效果**（旧缓存被跳过、内容不变），
+  而不是只断言布尔标记。
+- `newHandshakeClearsLiveMarkerButKeepsAuthoritativeContent` —— 复现「hello 后标记为假」。
+- `reconnectThenReselectStillProtectsInMemoryContent` —— 重连后重选不得被旧缓存覆盖。
+- `conversationOnlyContentSurvivesReconnectAndStaleCacheSeed` —— **第 15 项的关键回归**：
+  steering 内容只进 conversation store、`exportConversationCache()` 为 null，重连后旧缓存
+  不得覆盖它。
+- `reselectingConversationOnlySessionDoesNotReseedFromStaleCache` —— 同一场景在真实播种调用点
+  （`selectSession`）上的表现。
+
+变异验证：把 `hasAuthoritativeContent` 的 `conversationItems` 那一路去掉时，
+上述最后两条**失败**；只保留 `liveSessionIds` 时全部失败；修复版全部通过。因此不是恒真断言。
+
+### 6.2 设备验证的更新
+
+`AndroidUiParityDeviceTest` 之前 7/8 失败是环境问题（`No compose hierarchies found`，
+模拟器上 APK 未安装导致 `MainActivity` 未启动 Compose 层级），**不是**改版引入的崩溃。
+本轮在干净安装 APK 后重跑：**8/8 全部通过**，包括此前争议的两条
+（`offlineNewSessionIsDisabledInsteadOfFailing`、`drawerTaskSectionHostsTheSessionList`）。
+
+底部标签栏「被手势条裁切」的复核结论：**未裁切**。像素分析显示所有 Tab 图标/文字的墨迹
+最底到 y=2281，而系统 `mandatorySystemGestures` 从 y=2316 起、`navigationBars` 从 y=2337 起，
+`DshBottomTabBar` 的 `navigationBarsPadding()` 生效，手势条之下是空白。
 
 ## 7. 仍未完成 / 不属本轮的项
 
@@ -204,3 +239,5 @@ Android Studio 亦在打开该工程）。以下改动**不属于本轮 UI 改�
   建议后续目视确认深色模式代码块。
 - `AndroidAppGraphFakeIntegrationDeviceTest` 的 `beforeSeq` 缺失属 shared/transport 侧的既有
   问题，不在 UI 改版范围。
+- **设备用例未进 CI**：`.github/workflows/*.yml` 只跑单测 + lint + assemble，不跑
+  `connectedDebugAndroidTest`，因此设备用例的失败面只能在本地模拟器复核。

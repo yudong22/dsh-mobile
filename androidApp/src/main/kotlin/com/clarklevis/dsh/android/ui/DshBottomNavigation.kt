@@ -41,7 +41,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.Image
 import com.clarklevis.dsh.android.R
 import com.clarklevis.dsh.shared.gateway.GatewayConnectionState
 
@@ -237,6 +236,18 @@ internal fun DshBrandHeader(
                         overflow = TextOverflow.Ellipsis,
                         style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
                     )
+                    // `›` 紧跟在副标题（`设备 | 工作空间`）之后，而不是放到整行末尾：
+                    // 整行都是 `brand-runtime-settings-button` 的点击区，箭头贴着「未分组」
+                    // 才读得出「点这里进设置」；放到连接状态词后面会被读成状态词的一部分。
+                    Image(
+                        painter = painterResource(R.drawable.ic_chevron_right),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(horizontal = 2.dp)
+                            .size(14.dp)
+                            .testTag("header-runtime-settings-chevron"),
+                        colorFilter = ColorFilter.tint(palette.textTertiary)
+                    )
                     // 过渡/失败态追加状态词，已连接是常态就不再赘述。
                     dshConnectionDetailText(connection)?.let { detail ->
                         Text(
@@ -248,12 +259,6 @@ internal fun DshBrandHeader(
                             modifier = Modifier.testTag("header-connection-status")
                         )
                     }
-                    Image(
-                        painter = painterResource(R.drawable.ic_chevron_right),
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        colorFilter = ColorFilter.tint(palette.textTertiary)
-                    )
                 }
             }
         }
@@ -300,63 +305,6 @@ internal fun DshNewTaskButton(
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(start = 9.dp),
             style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-        )
-    }
-}
-
-/**
- * 截图首页搜索框：次级面胶囊底、无描边、三级灰占位。
- */
-@Composable
-internal fun DshSearchField(
-    query: String,
-    placeholder: String,
-    onQueryChange: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val palette = dshPalette()
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(44.dp)
-            .background(palette.surfaceMuted, RoundedCornerShape(22.dp))
-            .padding(horizontal = 15.dp)
-            .testTag("workspace-session-search"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(9.dp)
-    ) {
-        Image(
-            painter = painterResource(R.drawable.ic_search),
-            contentDescription = null,
-            modifier = Modifier.size(19.dp),
-            colorFilter = ColorFilter.tint(palette.textTertiary)
-        )
-        BasicTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            modifier = Modifier.weight(1f),
-            textStyle = TextStyle(
-                color = palette.textPrimary,
-                fontSize = 16.sp,
-                platformStyle = PlatformTextStyle(includeFontPadding = false)
-            ),
-            cursorBrush = SolidColor(palette.primary),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = {}),
-            decorationBox = { innerTextField ->
-                Box(contentAlignment = Alignment.CenterStart) {
-                    if (query.isEmpty()) {
-                        Text(
-                            placeholder,
-                            color = palette.textTertiary,
-                            fontSize = 16.sp,
-                            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                        )
-                    }
-                    innerTextField()
-                }
-            }
         )
     }
 }

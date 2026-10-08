@@ -113,13 +113,35 @@ internal class AndroidGatewayProjection(
     fun exportSessionCache(): String = mobileStore.exportSessionCache()
 
     /**
-     * 该会话本进程是否已收到过实时（或宿主基线）内容。
+     * 该会话在本**连接**上是否收到过实时（或宿主基线）帧。
      *
-     * 平台层用它决定能否用磁盘缓存播种：缓存是**非网络基线**，只应在内存里还没有更权威
-     * 内容时使用。若只看 `conversation.isNotEmpty()`，会把「上一次恢复出来的缓存」误判为
-     * 实时内容，导致真正的实时数据被旧基线覆盖或反过来跳过必要的恢复。
+     * 注意这是「连接代」语义而非「内存里有没有内容」：`hello` 会把它清空。判定能否用磁盘缓存
+     * 播种请用 [hasAuthoritativeContent]，否则重连后会拿旧基线覆盖仍然有效的内存内容。
      */
     fun hasLiveContent(sessionId: String): Boolean = sessionId in liveSessionIds
+
+    /**
+     * 该会话是否存在**不得被磁盘缓存覆盖**的权威内容。
+     *
+     * 缓存是「非网络基线」，只应在内存里还没有该会话内容时用于播种。三个来源任一成立即算有：
+     *  - 本连接收到过实时/基线帧（[liveSessionIds]）；
+     *  - 内存里已经留有该会话的事件基线（`historyEvents`）；
+     *  - **已渲染**的会话内容（`conversationItems`）。
+     *
+     * 第三条必不可少，且不能由第二条替代：`historyEvents` 只是「可落盘的规范化事件」缓冲，
+     * 而 steering（排队）消息经 `conversationStore.replaceSteeringMessages` 只进
+     * `conversationItems`、不进 `historyEvents`（实测此时 `exportConversationCache()` 为 null）。
+     * 这类行不会随 `hello` 的 `clearTransient` 消失，因此在重连（`hello` 清空 [liveSessionIds]）
+     * 之后仍然存在于屏幕上。只看前两条时本函数会返回 false，随后的重选就会用旧磁盘基线把
+     * 已经渲染出来的内容覆盖掉。
+     *
+     * 注意：快通道的在途临时 chunk 会被 `hello` 的 `clearTransient` 合理清掉，那种情况下
+     * 返回 false 是正确的——此时屏幕上确实没有内容需要保护。
+     */
+    fun hasAuthoritativeContent(sessionId: String): Boolean =
+        hasLiveContent(sessionId) ||
+            historyEvents[sessionId].orEmpty().isNotEmpty() ||
+            conversationItems[sessionId].orEmpty().isNotEmpty()
 
     fun restoreSessionCache(sessionsJson: String): SharedMobileSnapshot {
         controlSnapshot = mobileStore.restoreSessions(sessionsJson)
@@ -150,6 +172,9 @@ internal class AndroidGatewayProjection(
      * 会失败并使该 domain 永久 fail-closed。
      */
     fun restoreConversationCache(sessionId: String, payload: String): SharedMobileSnapshot {
+        // 二次校验（调用方已在锁外查过一次）：检查与写入必须原子，否则「磁盘读取」这段挂起
+        // 期间到达的实时帧会被旧基线覆盖。所有调用方都经 mutationLock 进入，因此这里在锁内。
+        if (hasAuthoritativeContent(sessionId)) return snapshot()
         val cached = runCatching {
             adapterJson.decodeFromString<SharedConversationCachePayload>(payload)
         }.getOrNull() ?: return snapshot()
@@ -525,7 +550,6 @@ internal class AndroidGatewayProjection(
             return
         }
         historyErrors.remove(sessionId)
-        liveSessionIds += sessionId
         val normalized = frame.events.orEmpty().map { it.normalized(sessionId) }
         historyStore.processingStarted(sessionId, normalized.size, frame.hasMore == true)
         val result = historyStore.pageReceived(
@@ -540,6 +564,9 @@ internal class AndroidGatewayProjection(
             lastError = result.errorCode ?: "history-page-failed"
             return
         }
+        // 只在页面真正被接受、且确实带着事件时置位：被拒绝的帧没有安装任何内容，
+        // 若也打上标记，会永久跳过该会话的缓存播种（直到下次 hello/reset）。
+        if (normalized.isNotEmpty()) liveSessionIds += sessionId
         historyHasMore[sessionId] = frame.hasMore == true
         conversationStore.replaceSession(sessionId, adapterJson.encodeToString(historyEvents[sessionId].orEmpty()))
         assistantStream.activeAttemptId()?.takeIf { assistantStream.hasBaseline(sessionId) }?.let {
@@ -563,13 +590,14 @@ internal class AndroidGatewayProjection(
             controlSnapshot = mobileStore.acceptFrame(rawJson)
         }
         val record = SessionEvent(sessionId, sequence, timestamp, gatewayEvent, frame.surfaceOp, frame.sourceEventSeqs)
-        liveSessionIds += sessionId
         val recordJson = adapterJson.encodeToString(record)
         val historyResult = historyStore.liveEventReceived(recordJson)
         if (!historyResult.accepted) {
             lastError = historyResult.errorCode ?: "history-live-failed"
             return
         }
+        // 与 acceptHistory 同理：被拒绝的实时帧不构成权威内容，不能打标记。
+        liveSessionIds += sessionId
         val conversationResult = conversationStore.receiveEvent(recordJson)
         if (!conversationResult.accepted) {
             conversationStore.replaceSession(sessionId, adapterJson.encodeToString(historyEvents[sessionId].orEmpty()))

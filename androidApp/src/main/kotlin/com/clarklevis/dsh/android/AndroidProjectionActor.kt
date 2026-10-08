@@ -243,11 +243,11 @@ internal class AndroidProjectionActor(
         }
 
     /**
-     * 该会话本进程是否已有实时内容。必须在 `mutationLock` 内读取：`liveSessionIds`
-     * 由后台 gateway dispatcher 写入，绕过锁会读到撕裂状态。
+     * 该会话是否已有不得被磁盘缓存覆盖的权威内容。必须在 `mutationLock` 内读取：
+     * 投影状态由后台 gateway dispatcher 写入，绕过锁会读到撕裂状态。
      */
-    suspend fun hasLiveContent(sessionId: String): Boolean = mutationLock.withLock {
-        projection.hasLiveContent(sessionId)
+    suspend fun hasAuthoritativeContent(sessionId: String): Boolean = mutationLock.withLock {
+        projection.hasAuthoritativeContent(sessionId)
     }
 
     /**
