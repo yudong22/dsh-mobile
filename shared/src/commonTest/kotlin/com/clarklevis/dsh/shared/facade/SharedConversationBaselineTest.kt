@@ -1,5 +1,6 @@
 package com.clarklevis.dsh.shared.facade
 
+import com.clarklevis.dsh.shared.projection.ConversationItem
 import com.clarklevis.dsh.shared.protocol.GatewayEvent
 import com.clarklevis.dsh.shared.protocol.SessionEvent
 import com.clarklevis.dsh.shared.protocol.wireJson
@@ -81,16 +82,28 @@ class SharedConversationBaselineTest {
         val received = mutableListOf<SharedMviEvent>()
         store.subscribe(SharedMviEventObserver(received::add))
 
+        // 断言的是**结果顺序**，不是传输形态：基线可能走全量替换，也可能走前缀增量
+        // （见 SharedConversationPrefixPatchTest）。这里按消费端同样的规则逐步重建。
+        var items = emptyList<ConversationItem>()
+        fun applyLatest() {
+            val p = patch(received.last { it.kind == "transition" })
+            items = when {
+                p.prefixItems != null -> p.prefixItems + items.drop(p.prefixReplaceCount)
+                else -> p.replacementItems.orEmpty()
+            }
+        }
+
         store.replaceSession("s", listOf(event(11, "新-1"), event(12, "新-2")))
-        assertEquals(listOf("新-1", "新-2"), patch(received.last()).replacementItems?.map { it.text })
+        applyLatest()
+        assertEquals(listOf("新-1", "新-2"), items.map { it.text })
 
         // 向后翻页后整体重排：旧的在最前
         store.replaceSession(
             "s",
             listOf(event(9, "旧-1"), event(10, "旧-2"), event(11, "新-1"), event(12, "新-2"))
         )
-        val order = patch(received.last()).replacementItems?.map { it.text }
-        assertEquals(listOf("旧-1", "旧-2", "新-1", "新-2"), order)
+        applyLatest()
+        assertEquals(listOf("旧-1", "旧-2", "新-1", "新-2"), items.map { it.text })
     }
 
     @Test

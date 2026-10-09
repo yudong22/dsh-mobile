@@ -20,6 +20,10 @@ data class SharedConversationBootstrap(val schema: Int = 1)
 /**
  * 高频 Conversation 专用 patch。live token 只发送有序 operation；历史基线才使用
  * replacementItems，禁止复用低频 SessionControl 的字典快照协议。
+ *
+ * 除了全量替换（[replacesAll]）与行内 operation，还有一个**前缀增量**通道
+ * （[prefixItems] / [prefixReplaceCount] / [baseItemCount]），供历史分页使用：
+ * 向后翻页只是往列表**前面**插入更早的行，绝大多数行不变，没必要每页重传全部行。
  */
 @Serializable
 data class SharedConversationPatch(
@@ -28,7 +32,24 @@ data class SharedConversationPatch(
     val operations: List<ConversationProjectionOperation> = emptyList(),
     val replacesAll: Boolean = false,
     val replacementItems: List<ConversationItem>? = null,
-    val lastSequence: Int = -1
+    val lastSequence: Int = -1,
+    /**
+     * 前缀增量的新表头：结果 = `prefixItems + 现有列表.drop(prefixReplaceCount)`。
+     *
+     * 用于历史分页（向后翻页）。只有 [baseItemCount] 与消费端当前行数一致时才有意义——
+     * 消费端据此 fail-closed，避免投影与镜像分叉后静默拼出错误列表。
+     */
+    val prefixItems: List<ConversationItem>? = null,
+    /**
+     * 现有列表开头需要被 [prefixItems] 取代的行数。
+     * 后续行（后缀）**不变**，因此不必传输。
+     */
+    val prefixReplaceCount: Int = 0,
+    /**
+     * 生成本 patch 时，服务端投影的行数。消费端用它校验自己与投影是否同步；
+     * 不一致说明镜像已分叉，必须 fail-closed 而不是继续拼接。
+     */
+    val baseItemCount: Int = -1
 )
 
 /** KMP 持有逐 session projector；平台只 dispatch 原始事件并订阅增量 UI patch。 */
@@ -184,7 +205,20 @@ class SharedConversationStore(
             replacementPatch(sessionId, records)
         }
 
-    /** [replaceSession] 两个变体共用的投影重建与 patch 构造。 */
+    /**
+     * [replaceSession] 两个变体共用的投影重建与 patch 构造。
+     *
+     * **为什么要做前缀 diff**：向后翻页只是往列表**前面**插入更早的行，已有行几乎不变。
+     * 但原先每页都发 `replacesAll + 全部行`，于是 MVI 边界每页序列化整份投影
+     * （实测 30 页/150 条消息累积 2316 KiB，是单遍的 9.0x，且随深度 O(n²) 增长）。
+     *
+     * **为什么这样是安全的**：`ConversationItem.id = "${sessionId}-${seq}"` 由 seq 决定，
+     * 重建是确定性的。这里用**数据类全等**求最长公共后缀：
+     * 结果恒等于 `nextItems`，与全量替换**逐项相同**——若中间某行确实变了，
+     * 公共后缀自然变短、更多行进前缀，正确性不依赖任何假设。
+     *
+     * 增量不划算时（例如首次基线、列表被整体改写）退回全量替换。
+     */
     private fun replacementPatch(
         sessionId: String,
         records: List<SessionEvent>
@@ -192,13 +226,59 @@ class SharedConversationStore(
         val normalized = records.associateBy(SessionEvent::seq).values.sortedBy(SessionEvent::seq)
         val projector = ConversationProjector(labels).apply { rebuild(normalized) }
         projector.replaceSteeringMessages(steeringRecords[sessionId].orEmpty())
+        val nextItems = projector.items
+        val previousItems = projectors[sessionId]?.items.orEmpty()
         projectors[sessionId] = projector
+        return baselinePatch(sessionId, previousItems, nextItems, projector.lastSequence)
+    }
+
+    /**
+     * 在「全量替换」与「前缀增量」之间选择，两者语义**完全等价**，
+     * 只影响跨边界的载荷大小。
+     *
+     * 只在「确实两头都有内容」时走增量（`suffixLength > 0 && prefixLength > 0`）：
+     *  - `prefixLength == nextItems.size`（没有保留任何后缀）→ 首次基线或整体改写，全量更直观；
+     *  - `prefixLength == 0`（前面没新增）→ 没有可省的内容，全量代价相同。
+     * 这样也天然避开「投影侧为空、镜像侧非空」的退化情形（如测试用 `loadFixture`
+     * 直接填镜像而不经本 store），不会让消费端的 `baseItemCount` 校验误触发。
+     */
+    private fun baselinePatch(
+        sessionId: String,
+        previousItems: List<ConversationItem>,
+        nextItems: List<ConversationItem>,
+        lastSequence: Int
+    ): SharedConversationPatch {
+        val suffixLength = commonSuffixLength(previousItems, nextItems)
+        val prefixLength = nextItems.size - suffixLength
+        val replacedCount = previousItems.size - suffixLength
+        if (suffixLength == 0 || prefixLength == 0) {
+            return SharedConversationPatch(
+                sessionId = sessionId,
+                replacesAll = true,
+                replacementItems = nextItems,
+                lastSequence = lastSequence
+            )
+        }
         return SharedConversationPatch(
             sessionId = sessionId,
-            replacesAll = true,
-            replacementItems = projector.items,
-            lastSequence = projector.lastSequence
+            prefixItems = nextItems.take(prefixLength),
+            prefixReplaceCount = replacedCount,
+            baseItemCount = previousItems.size,
+            lastSequence = lastSequence
         )
+    }
+
+    /** 两个列表从尾部开始的**数据类全等**连续长度（不做任何结构假设）。 */
+    private fun commonSuffixLength(
+        previous: List<ConversationItem>,
+        next: List<ConversationItem>
+    ): Int {
+        val max = minOf(previous.size, next.size)
+        var matched = 0
+        while (matched < max && previous[previous.size - 1 - matched] == next[next.size - 1 - matched]) {
+            matched += 1
+        }
+        return matched
     }
 
     fun clearSession(sessionId: String): SharedMviDispatchResult = dispatch("clear") {

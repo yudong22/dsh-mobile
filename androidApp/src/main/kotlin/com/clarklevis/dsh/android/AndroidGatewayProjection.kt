@@ -786,6 +786,31 @@ internal class AndroidGatewayProjection(
         val next = conversationItems.toMutableMap()
         val nextSequences = conversationLastSequences.toMutableMap()
         val previousSequence = nextSequences[patch.sessionId] ?: -1
+        // 前缀增量（历史分页）：结果 = prefixItems + 现有列表.drop(prefixReplaceCount)。
+        //
+        // **fail-closed**：`baseItemCount` 必须与镜像当前行数一致，否则说明投影与镜像已分叉
+        // （例如漏收过一次 patch）。此时不能"尽力拼接"——那会静默产出错误列表；
+        // 直接拒绝，让上层走全量重建。
+        val prefixItems = patch.prefixItems
+        if (prefixItems != null) {
+            val currentItems = next[patch.sessionId].orEmpty()
+            require(patch.operations.isEmpty()) { "prefix patch must not carry operations" }
+            require(patch.replacementItems == null) { "prefix patch must not carry replacementItems" }
+            require(patch.baseItemCount == currentItems.size) {
+                "prefix patch base ${patch.baseItemCount} does not match mirror ${currentItems.size}"
+            }
+            require(patch.prefixReplaceCount in 0..currentItems.size) {
+                "prefixReplaceCount ${patch.prefixReplaceCount} out of range for ${currentItems.size}"
+            }
+            require(patch.lastSequence >= previousSequence)
+            val merged = prefixItems + currentItems.drop(patch.prefixReplaceCount)
+            require(merged.map(ConversationItem::id).distinct().size == merged.size) {
+                "prefix patch produced duplicate row ids"
+            }
+            next[patch.sessionId] = merged
+            nextSequences[patch.sessionId] = patch.lastSequence
+            return ConversationPlan(next, nextSequences)
+        }
         if (patch.replacesAll) {
             val replacement = requireNotNull(patch.replacementItems)
             require(patch.operations.isEmpty())
