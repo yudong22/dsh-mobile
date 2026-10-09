@@ -29,6 +29,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -155,6 +157,28 @@ private fun DshTabItem(
 }
 
 /**
+ * 页头圆钮的**共用表面**：投影 + 圆形裁切 + surface 底 + 描边。
+ *
+ * 抽出来是因为页头左侧现在并排渲染「返回 + 抽屉」两个圆钮（v1.9.7）。
+ * 此前返回钮走 [TopBarCircleButton]（带投影和 0.7dp 描边），抽屉钮只有一个
+ * 纯色圆底——两者从不同框出现，所以看不出差异；一旦并排，深浅不一的观感就暴露了。
+ * 让两处引用同一个修饰符，以后调一处即可（不需要分别改两个文件）。
+ */
+internal fun Modifier.dshHeaderCircleButtonSurface(palette: DshPalette): Modifier = this
+    .dropShadow(
+        shape = CircleShape,
+        shadow = Shadow(
+            radius = 12.dp,
+            spread = 0.dp,
+            color = Color.Black.copy(alpha = if (palette.isDark) 0.24f else 0.07f),
+            offset = DpOffset(x = 0.dp, y = 4.dp)
+        )
+    )
+    .clip(CircleShape)
+    .background(palette.surface)
+    .border(0.7.dp, palette.cardBorder, CircleShape)
+
+/**
  * 打开侧边抽屉的圆钮：三条横线。
  *
  * 首页与会话页（任务详情）共用同一个组件——两处的动作完全相同（打开同一个抽屉快速切换任务），
@@ -174,7 +198,8 @@ internal fun DshDrawerButton(
     Box(
         modifier = modifier
             .size(size)
-            .background(palette.surface, CircleShape)
+            // 与返回钮共用同一表面，避免同一槽位里两个圆钮深浅不一。
+            .dshHeaderCircleButtonSurface(palette)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = "打开侧边栏" }
             .testTag(testTag),

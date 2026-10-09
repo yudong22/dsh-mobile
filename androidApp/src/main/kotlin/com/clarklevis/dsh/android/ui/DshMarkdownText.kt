@@ -270,6 +270,17 @@ private fun DshRenderedMarkdownText(
                 setPadding(0, 0, 0, 0)
                 setLineSpacing(lineSpacingExtra, 1f)
                 linksClickable = true
+                // 正文可长按选择/局部复制。
+                //
+                // 此前正文是**不可选**的：整个详情页只有消息尾部一个 16×26dp 的复制图标，
+                // 要复制代码块里的某几行、或一句话，只能整条复制（见
+                // Docs/v1.9.7-conversation-detail-plan.md §2.2 UX-4）。
+                // 轨迹页早就用了 SelectionContainer（TrajectoryDetailUi.kt:354），
+                // 这里对齐同一能力。
+                //
+                // 用平台 TextView 自身的可选择性（而非再包一层 SelectionContainer）：
+                // 内容本来就渲染在 AndroidView 里，包一层只会多一个宿主且选择手柄行为更差。
+                setTextIsSelectable(true)
             }
         },
         onReset = { textView ->

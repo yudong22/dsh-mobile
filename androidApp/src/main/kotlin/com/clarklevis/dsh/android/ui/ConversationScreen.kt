@@ -120,11 +120,14 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -163,6 +166,7 @@ import com.clarklevis.dsh.shared.protocol.GatewayImageAttachment
 import com.clarklevis.dsh.shared.protocol.GatewayPendingQuestionRequest
 import com.clarklevis.dsh.shared.protocol.GatewayQuestion
 import com.clarklevis.dsh.shared.protocol.GatewayQuestionAnswer
+import com.clarklevis.dsh.shared.protocol.GatewayTask
 import com.clarklevis.dsh.shared.projection.TrajectoryNode
 import com.clarklevis.dsh.shared.projection.TrajectoryNodeKind
 import kotlinx.coroutines.flow.collectLatest
@@ -215,45 +219,48 @@ internal fun ConversationScreen(
     Scaffold(
         containerColor = palette.canvas,
         topBar = {
-            // 页头直接复用 DshPageHeader：与四个 Tab 根页**完全同一几何**
-            // （56dp 高、46dp 圆钮、18sp 居中标题）。
+            // 页头复用 DshPageHeader：与四个 Tab 根页**完全同一几何**
+            // （56dp 高、40dp 圆钮、18sp 居中标题）。
             //
-            // 层级规则（本轮重整）：详情页是**下钻页**，左侧渲染返回钮回到任务列表
-            // （= 首页）；抽屉收敛到详情页后，抽屉钮放在右侧动作区「更多」旁边。
-            // Tab 根页面不渲染返回钮（层级切换走底栏），只有这里需要显式返回。
+            // 层级规则：详情页是**下钻页**，左侧渲染返回钮回到任务列表（= 首页）；
+            // 抽屉钮放在返回钮**右侧**（用户要求 + 设计稿
+            // `Docs/design/conversation-detail.html:34-36` 的左侧双钮槽位），
+            // 「更多」独占右侧动作区。左右槽位由 DshPageHeader 按按钮数同源推导，
+            // 因此标题仍整屏居中。
+            //
+            // 此前抽屉钮被塞进 `actions` 的 Row 里，而右侧槽位被写死 40dp——
+            // 两个 40dp 钮重叠 63px、靠右那个被挤出屏幕（真机 uiautomator 实测，
+            // 见 Docs/v1.9.7-conversation-detail-plan.md §1.1）。现在抽屉走
+            // `onOpenDrawer`，进左侧槽位，不再需要手写 Row。
             DshPageHeader(
                 title = title,
                 onBack = {
                     dismissInput()
                     onBack()
                 },
+                // 副标题显示会话任务进度（「3 个任务 · 1 进行中」）。
+                // 此前副标题槽位始终空着——页头为此**永久预留了 16dp 高度**
+                // （DshPageHeader 的 subtitle slot），却什么也不显示。
+                // 数据源与输入框上方的任务面板同源（taskSnapshot）。
+                subtitle = conversationTaskSubtitle(stateHolder.snapshot.taskSnapshot?.tasks),
+                onOpenDrawer = LocalDrawerOpener.current,
                 actions = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // 抽屉入口在详情页（LocalDrawerOpener 由抽屉宿主提供）。
-                        // 尺寸走同一 token（40dp）：此前这里写死 40dp、左侧返回钮却是
-                        // 46dp，两个圆钮并排时大小不一。
-                        LocalDrawerOpener.current?.let { openDrawer ->
-                            DshDrawerButton(
-                                onClick = openDrawer,
-                                size = DshPageHeaderCircleButtonSize
-                            )
-                        }
-                        ConversationMoreMenu(
-                            canBrowseFiles = stateHolder.snapshot.selectedSessionId != null &&
-                                stateHolder.gatewayState.connection == GatewayConnectionState.CONNECTED &&
-                                "file-downloads" in stateHolder.gatewayState.capabilities,
-                            onBrowseFiles = { showWorkspaceFiles = true },
-                            // 对话 / 轨迹 折进「更多」：它们原先以分段控件形式常驻在页头下方，
-                            // 一直占掉一行可视高度，而多数时间用户只看「对话」。
-                            selectedPage = pagerState.currentPage,
-                            onSelectPage = { target ->
-                                dismissInput()
-                                scope.launch { pagerState.animateScrollToPage(target) }
-                            },
-                            agentPresetLabel = agentPresetDisplayName(agentPresetId, agentPresetName),
-                            connection = stateHolder.gatewayState.connection
-                        )
-                    }
+                    // 右侧只剩「更多」；ConversationMoreMenu 自带 40dp 圆钮。
+                    ConversationMoreMenu(
+                        canBrowseFiles = stateHolder.snapshot.selectedSessionId != null &&
+                            stateHolder.gatewayState.connection == GatewayConnectionState.CONNECTED &&
+                            "file-downloads" in stateHolder.gatewayState.capabilities,
+                        onBrowseFiles = { showWorkspaceFiles = true },
+                        // 对话 / 轨迹 折进「更多」：它们原先以分段控件形式常驻在页头下方，
+                        // 一直占掉一行可视高度，而多数时间用户只看「对话」。
+                        selectedPage = pagerState.currentPage,
+                        onSelectPage = { target ->
+                            dismissInput()
+                            scope.launch { pagerState.animateScrollToPage(target) }
+                        },
+                        agentPresetLabel = agentPresetDisplayName(agentPresetId, agentPresetName),
+                        connection = stateHolder.gatewayState.connection
+                    )
                 }
             )
         }
@@ -300,25 +307,11 @@ internal fun TopBarCircleButton(
     modifier: Modifier = Modifier
 ) {
     val palette = dshPalette()
-    val shadowColor = Color.Black.copy(alpha = if (palette.isDark) 0.24f else 0.07f)
     Box(
         modifier = modifier.size(DshPageHeaderCircleButtonSize)
-            .dropShadow(
-                shape = CircleShape,
-                shadow = Shadow(
-                    radius = 12.dp,
-                    spread = 0.dp,
-                    color = shadowColor,
-                    offset = DpOffset(x = 0.dp, y = 4.dp)
-                )
-            )
-            .clip(CircleShape)
-            .background(palette.surface)
-            .border(
-                0.7.dp,
-                palette.cardBorder,
-                CircleShape
-            )
+            // 表面（投影 + 圆底 + 描边）与抽屉钮共用同一个修饰符：
+            // 两者现在并排出现在页头左侧，必须完全同款。
+            .dshHeaderCircleButtonSurface(palette)
             .clickable(onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center
@@ -805,10 +798,21 @@ private fun ConversationTimeline(
     LaunchedEffect(windowInfo.containerSize.width, targetHeight) {
         stateHolder.updateThumbnailTargetSize(windowInfo.containerSize.width, targetHeight)
     }
-    LaunchedEffect(listState, items) {
+    // 附件可见性 effect：**必须与上面的预取 effect 一样只以「结构」为 key**。
+    //
+    // 此前 key 是 `items`，而它每个流式 token 都是新实例（快照按 32ms 节奏重建，
+    // 见 AndroidSharedStateHolder.kt:2579），于是这条 effect 每秒被取消并重启约 31 次，
+    // 每次都把 distinctUntilChanged 状态清零、必然重新回调一次
+    // `updateVisibleAttachments`（该方法会展开整个会话的图片集合并对两个 LRU 做
+    // retainKeys / mapKeys，见 AndroidSharedStateHolder.kt:1917-1946、2426-2437、2545-2553）。
+    //
+    // 现在只依赖「可见行数 + 附件映射」这两个结构性输入；映射本身经
+    // rememberUpdatedState 读取，不再作为 key。
+    val latestAttachmentIdsByTimelineId by rememberUpdatedState(attachmentIdsByTimelineId)
+    LaunchedEffect(listState, timelineEntryCount) {
         snapshotFlow {
             listState.layoutInfo.visibleItemsInfo.flatMapTo(mutableSetOf()) { visible ->
-                attachmentIdsByTimelineId[visible.key.toString()].orEmpty()
+                latestAttachmentIdsByTimelineId[visible.key.toString()].orEmpty()
             }
         }.distinctUntilChanged().collect(stateHolder::updateVisibleAttachments)
     }
@@ -1163,9 +1167,8 @@ private fun Composer(
     onDismissInput: () -> Unit
 ) {
     val palette = dshPalette()
-    val shape = RoundedCornerShape(28.dp)
+    val shape = DshCardCornerRadius
     val shadowColor = palette.floatingShadow
-    val composerHasContent = stateHolder.messageDraft.trim().isNotEmpty() || stateHolder.preparedImages.isNotEmpty()
     // 主操作色块上的前景：浅色主题主色为深蓝，用白；深色主题主色偏亮，改用深色文字保证对比度。
     val primaryActionForeground = if (palette.isDark) palette.canvas else Color.White
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -1262,7 +1265,14 @@ private fun Composer(
                         .onFocusChanged { inputIsFocused = it.isFocused }
                         .focusRequester(queueEditFocusRequester)
                         .testTag("composer-input"),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = palette.textPrimary),
+                    // 字号走全局正文 token（15sp），不再用 bodyLarge（16sp）：
+                    // 设计稿要求占位 15sp，且详情页此前是**唯一**比列表页正文大一号的页面
+                    // （见 Docs/v1.9.7-conversation-detail-plan.md §1.3）。
+                    textStyle = TextStyle(
+                        fontSize = DshBodyFontSize,
+                        color = palette.textPrimary,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    ),
                     cursorBrush = SolidColor(palette.primary),
                     visualTransformation = slashCommandVisualTransformation(commandToken, palette.primary),
                     decorationBox = { field ->
@@ -1270,7 +1280,11 @@ private fun Composer(
                             if (stateHolder.messageDraft.isEmpty()) {
                                 Text(
                                     "描述你想要构建的内容",
-                                    color = palette.textTertiary
+                                    color = palette.textTertiary,
+                                    fontSize = DshBodyFontSize,
+                                    style = TextStyle(
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    )
                                 )
                             } else if (
                                 commandToken != null &&
@@ -1291,7 +1305,10 @@ private fun Composer(
                                             append(commandHint)
                                         }
                                     },
-                                    style = MaterialTheme.typography.bodyLarge
+                                    fontSize = DshBodyFontSize,
+                                    style = TextStyle(
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    )
                                 )
                             }
                             field()
@@ -1311,48 +1328,63 @@ private fun Composer(
                         modifier = Modifier.weight(1f)
                     )
                     ContextUsageRing(stateHolder)
+                    // 发送 / 停止：**单一状态源**。
+                    //
+                    // 此前「是否可点」与「多透明」各看一个信号——可点性看 canSend，
+                    // 透明度看 composerHasContent——于是会出现「不透明但点不动」
+                    // （有草稿但未连接/预设未就绪）和「半透明却能点」两种自相矛盾的状态。
+                    //
+                    // 现在两者都由同一个 `sendButtonEnabled` 决定；不可点时用
+                    // palette.disabledPrimary 实色（浅蓝），而不是把主色降透明度——
+                    // alpha 叠在画布上会「变淡与变脏分不开」，这是
+                    // DshTheme.kt:207-217 已经记录过的既有决策（DshFab 同款）。
+                    val stopMode = stateHolder.showsSessionStopButton
+                    val sendButtonEnabled = if (stopMode) {
+                        stateHolder.canCancelSelectedSession
+                    } else {
+                        stateHolder.canSend
+                    }
+                    // 禁用态前景不能沿用白色：白字压在浅蓝 #BBD1FB 上只有约 1.5:1。
+                    // 与 DshFab（DshGroupedList.kt:318-325）取同一套推导——
+                    // 浅色主题禁用底是浅蓝，用主色画图标读作「同一个按钮」；
+                    // 深色主题禁用底是暗蓝，白图标对比度最优。
+                    val sendButtonForeground = when {
+                        sendButtonEnabled -> primaryActionForeground
+                        palette.isDark -> palette.onPrimary
+                        else -> palette.primary
+                    }
                     Box(
                         Modifier.size(42.dp)
-                            .alpha(
-                                if (stateHolder.showsSessionStopButton) {
-                                    if (stateHolder.canCancelSelectedSession) 1f else 0.66f
-                                } else if (composerHasContent) 1f else 0.48f
-                            )
                             .clip(CircleShape)
-                            .background(palette.primary)
+                            .background(
+                                if (sendButtonEnabled) palette.primary else palette.disabledPrimary
+                            )
                             .clickable(
-                                enabled = if (stateHolder.showsSessionStopButton) {
-                                    stateHolder.canCancelSelectedSession
-                                } else {
-                                    stateHolder.canSend
-                                },
-                                onClick = if (stateHolder.showsSessionStopButton) {
+                                role = Role.Button,
+                                enabled = sendButtonEnabled,
+                                onClick = if (stopMode) {
                                     stateHolder::cancelSelectedSession
                                 } else {
                                     { stateHolder.sendMessage() }
                                 }
                             )
                             .semantics {
-                                contentDescription = if (stateHolder.showsSessionStopButton) {
-                                    "停止生成"
-                                } else {
-                                    "发送"
-                                }
+                                contentDescription = if (stopMode) "停止生成" else "发送"
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        if (stateHolder.showsSessionStopButton) {
+                        if (stopMode) {
                             Box(
                                 Modifier.size(14.dp)
                                     .clip(RoundedCornerShape(3.dp))
-                                    .background(primaryActionForeground)
+                                    .background(sendButtonForeground)
                             )
                         } else {
                             Icon(
                                 painter = painterResource(R.drawable.ic_arrow_up),
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp),
-                                tint = primaryActionForeground
+                                tint = sendButtonForeground
                             )
                         }
                     }
@@ -3085,4 +3117,31 @@ private fun permissionIcon(value: String?): Int = when (value) {
     "read-only" -> R.drawable.ic_permission_read
     "danger-full-access" -> R.drawable.ic_permission_warning
     else -> R.drawable.ic_permission_ask
+}
+
+/**
+ * 页头副标题：会话任务进度，例如「3 个任务 · 1 进行中」。
+ *
+ * **用词必须诚实**：这里刻意不写「后台任务」。核对协议与投影后确认，
+ * 「后台任务 / 子代理」这个概念在本 App 里**不存在**——数据源只有 `taskSnapshot`，
+ * 它就是 `todo_write` 的待办清单投影（`SharedMobileStore.kt:137-140`；
+ * 状态取值为 `in_progress` / `completed` / 其他=待处理）。
+ * 写成「后台任务」会承诺一个并不存在的功能。
+ *
+ * 计数口径与输入框上方的任务面板（`TaskGoalUi` 的 `taskSummary`）保持一致，
+ * 避免同一页面上两处对同一份数据给出不同数字。
+ *
+ * 无任务时返回 null（页头不显示副标题），而不是显示「0 个任务」占位。
+ */
+internal fun conversationTaskSubtitle(tasks: List<GatewayTask>?): String? {
+    if (tasks.isNullOrEmpty()) return null
+    val completed = tasks.count { it.status == "completed" }
+    val active = tasks.count { it.status == "in_progress" }
+    val pending = tasks.size - completed - active
+    val detail = buildList {
+        if (active > 0) add("$active 进行中")
+        if (pending > 0) add("$pending 待处理")
+        if (completed > 0) add("$completed 已完成")
+    }.joinToString(" · ")
+    return if (detail.isEmpty()) "${tasks.size} 个任务" else "${tasks.size} 个任务 · $detail"
 }

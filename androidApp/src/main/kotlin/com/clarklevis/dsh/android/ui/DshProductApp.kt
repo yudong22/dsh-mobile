@@ -497,10 +497,13 @@ private fun DrawerDestinationScreen(title: String, message: String, onBack: () -
 /**
  * 页面顶栏的**唯一**实现：左侧按钮 + 居中标题 + 右侧动作区。
  *
- * 层级规则（本轮重整）：**Tab 根页面**（任务列表/项目/定时任务/设置）不渲染左侧按钮——
- * 它们是平级目的地，切换走底栏，「后退」没有语义；**下钻页**（任务详情等）传 [onBack]
- * 渲染返回钮。抽屉按钮（[onOpenDrawer]）与返回钮互斥：详情页包在抽屉宿主里时左侧
- * 是抽屉钮，返回改走系统返回手势。
+ * 层级规则：**Tab 根页面**（任务列表/项目/定时任务/设置）不渲染左侧按钮——
+ * 它们是平级目的地，切换走底栏，「后退」没有语义；**下钻页**（任务详情等）
+ * 传 [onBack] 渲染返回钮。
+ *
+ * 左侧**返回 + 抽屉可以并存**：任务详情页既需要显式返回（回到任务列表），
+ * 也需要抽屉入口（切换任务/设备）。两者的宽度由 [dshPageHeaderSlotWidth] 统一推导，
+ * 右侧动作区取**同一个值**，因此标题始终落在整屏中线上。
  *
  * 标题居中、字号统一取 [DshPageTitleFontSize]（18sp）。左侧无按钮时渲染等宽空占位，
  * 保证标题在**整屏**居中而不是在剩余空间里居中。
@@ -515,15 +518,20 @@ internal fun DshPageHeader(
     onOpenDrawer: (() -> Unit)? = null,
     onTitleClick: (() -> Unit)? = null,
     /**
-     * 右侧动作区的宽度。默认与左侧按钮槽位等宽，使标题**整屏居中**。
-     * 需要放多个动作时显式给一个更大的值——左侧占位会自动取同样宽度，
-     * 标题仍居中（两侧对称）。不要让动作区自适应增长，那会把标题推离中线。
+     * 右侧动作区的宽度。默认按左侧实际按钮数推导，使标题**整屏居中**。
+     * 左右两侧取同一个值——只要有一侧偏宽，标题就会被推离屏幕中线。
      */
     actionsWidth: androidx.compose.ui.unit.Dp? = null,
     actions: @Composable () -> Unit = {}
 ) {
     val palette = dshPalette()
-    val sideSlotWidth = actionsWidth ?: DshPageHeaderCircleButtonSize
+    // 左侧实际渲染的按钮数：返回 + 抽屉（两者可并存）。
+    val leftButtonCount = (if (onBack != null) 1 else 0) + (if (onOpenDrawer != null) 1 else 0)
+    // **左右必须同宽**：优先用调用方显式声明的 actionsWidth，否则按左侧按钮数推导。
+    // 此前右侧动作区被写死成 40dp，而详情页往里塞了两个钮（需 88dp），
+    // 结果是两个钮重叠 63px、右侧那个被挤出屏幕（真机 uiautomator 实测。
+    // 见 Docs/v1.9.7-conversation-detail-plan.md §1.1）。
+    val sideSlotWidth = actionsWidth ?: dshPageHeaderSlotWidth(leftButtonCount)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -533,23 +541,30 @@ internal fun DshPageHeader(
             .padding(horizontal = DshPageHeaderHorizontalPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 左侧槽位：抽屉钮（详情页）> 返回钮（下钻页）> 空占位（Tab 根页面）。
-        // 宽度与右侧动作区**对称**，标题因此落在整屏中线上。
+        // 左侧槽位：返回钮与抽屉钮可并存（返回在前、抽屉紧随其后），
+        // 都与右侧动作区**等宽**对应，标题因此落在整屏中线上。
         Box(
             Modifier.width(sideSlotWidth).height(DshPageHeaderCircleButtonSize),
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.CenterStart
         ) {
-            when {
-                onOpenDrawer != null -> DshDrawerButton(
-                    onClick = onOpenDrawer,
-                    size = DshPageHeaderCircleButtonSize,
-                    testTag = "brand-drawer-button"
-                )
-                onBack != null -> TopBarCircleButton(
-                    iconRes = R.drawable.ic_back_chevron,
-                    description = "返回",
-                    onClick = onBack
-                )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(DshPageHeaderButtonGap)
+            ) {
+                if (onBack != null) {
+                    TopBarCircleButton(
+                        iconRes = R.drawable.ic_back_chevron,
+                        description = "返回",
+                        onClick = onBack
+                    )
+                }
+                if (onOpenDrawer != null) {
+                    DshDrawerButton(
+                        onClick = onOpenDrawer,
+                        size = DshPageHeaderCircleButtonSize,
+                        testTag = "brand-drawer-button"
+                    )
+                }
             }
         }
         // 标题 + 可选副标题。**两种页面共用同一套行高**：即使没有副标题，
@@ -583,7 +598,10 @@ internal fun DshPageHeader(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
+                // 稳定 tag：设备测试要靠它验证标题落在**整屏中线**上。
+                // 此前标题没有 tag，测试只能用返回钮间接推断——那验证不了居中。
+                modifier = Modifier.testTag("header-title")
             )
             // 副标题槽位：有内容时显示，无内容时留一个等高占位——
             // 用 Box 固定高度而不是条件渲染，保证标题的垂直位置在两种页面间一致。
@@ -630,12 +648,15 @@ internal fun DshPageHeader(
         // 右侧动作区**必须与左侧槽位等宽**，标题才是整屏居中而不是在剩余空间里居中。
         //
         // 此前这里放宽成自适应宽度以容纳「抽屉 + 更多」两个按钮，代价是标题被推离中线
-        // （真机实测定时任务页标题偏左 28dp）。需要放多个动作的页面应改用
-        // [DshPageHeader.actionsWidth] 显式声明，并同步给左侧占位同样的宽度，
-        // 而不是让动作区无限增长。
+        // （真机实测定时任务页标题偏左 28dp）。现在宽度改由 [dshPageHeaderSlotWidth]
+        // 与左侧同源推导：有几个左侧按钮，右侧就留同样宽——不再需要调用方手写。
+        //
+        // 对齐取 **CenterEnd**：槽位可能比内容宽（左侧两个钮、右侧只有一个「更多」），
+        // 此时动作要**贴右缘**（设计稿 `conversation-detail.html:37` 的
+        // `.side-slot.right{justify-content:flex-end}`），而不是浮在槽位中间。
         Box(
-            Modifier.width(actionsWidth ?: DshPageHeaderCircleButtonSize),
-            contentAlignment = Alignment.Center
+            Modifier.width(sideSlotWidth),
+            contentAlignment = Alignment.CenterEnd
         ) {
             actions()
         }

@@ -80,6 +80,28 @@ internal val DshPageHeaderCircleButtonSize = 40.dp
 internal val DshPageHeaderHorizontalPadding = 12.dp
 
 /**
+ * 页头左侧相邻圆钮之间的水平间距。
+ *
+ * 任务详情页左侧并排放「返回 + 抽屉」两个 40dp 钮，需要 8dp 间隔才读得出是两个独立入口
+ * （设计稿 `Docs/design/conversation-detail.html:36` 的 `.side-slot{gap:8px}`）。
+ * 左右槽位按**同一公式**取宽，标题因此仍然整屏居中。
+ */
+internal val DshPageHeaderButtonGap = 8.dp
+
+/**
+ * 页头单侧槽位的宽度：容纳 [DshPageHeaderCircleButtonSize] 个圆钮所需的宽度。
+ *
+ * 抽成函数而不是各处手写，是因为**左右两侧必须用同一个值**——只要有一侧偏宽，
+ * 标题就会被推离屏幕中线（真机实测过定时任务页标题偏左 28dp）。
+ * 调用方只需告诉它「这一侧有几个钮」。
+ */
+internal fun dshPageHeaderSlotWidth(buttonCount: Int): androidx.compose.ui.unit.Dp {
+    val count = buttonCount.coerceAtLeast(0)
+    if (count <= 1) return DshPageHeaderCircleButtonSize
+    return DshPageHeaderCircleButtonSize * count + DshPageHeaderButtonGap * (count - 1)
+}
+
+/**
  * 底部导航栏几何：**内容高度**（不含系统导航栏 inset）。
  *
  * 从 84dp / 单项 72dp 调矮到 68dp / 58dp：底栏是常驻 chrome，此前占掉的高度
@@ -105,7 +127,7 @@ internal val DshCaptionFontSize = 13.sp
 /**
  * 「我的」页与子设置页的行几何。
  *
- * 字号**对齐 App 的通用层级**（[DshBodyFontSize] 15sp 正文 / [DshCaptionFontSize] 13sp 辅助��，
+ * 字号**对齐 App 的通用层级**（[DshBodyFontSize] 15sp 正文 / [DshCaptionFontSize] 13sp 辅助），
  * 不再单独放大：此前照参考图取 17sp/15sp，比列表页（15sp/12sp）大两档，
  * 四个 Tab 之间切换时文字明显跳一档（真机截图对比确认）。
  * 行高保留 56dp 的宽松感——那是设置项该有的疏朗，字号则与全局一致。

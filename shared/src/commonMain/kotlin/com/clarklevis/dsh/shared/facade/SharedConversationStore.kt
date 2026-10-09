@@ -67,8 +67,21 @@ class SharedConversationStore(
     }
 
     /**
-     * 单个 streaming 增量。DSH 的 `session.seq` 是 turn 级 journal watermark，同一 turn
-     * 内的所有 chunk 共享同一个 seq，因此 [receiveEvent] 的单调性守卫在这里并不适用。
+     * 单个 streaming 增量（**仅旧版 Mobile Gateway 路径**）。
+     *
+     * 历史背景（已核对主机与网关源码）：DSH 主机的 `session.seq` 是**逐事件**的 journal 下标
+     * （`packages/core/session/src/index.ts` 的 `seq: SessionSeq(this.log.length)`），
+     * 并非 turn 级水位。但 **rc.2 之前的 Mobile Gateway** 合成 `assistant/chunk` 时，
+     * 每个 chunk 都复用「下一个持久事件」的 seq，导致同一 turn 内多个 chunk **共享同一个 seq**
+     * （该网关自己的审计文档记录了这个形状；`a8dbe57` 已改为独立的 `assistant-stream` 帧）。
+     *
+     * 因此 [receiveEvent] 的单调性守卫对那条旧路径不适用，需要本方法绕过它。
+     *
+     * **现状**：当前网关发的是 `assistant-stream` 帧，**不带 seq**（改带
+     * `revision`/`index`），由 [assistantChunks] / `foldAssistantChunks` 消费，
+     * 根本不经过 [SessionEvent]。所以本方法目前只服务于旧版网关；
+     * Android 平台也**尚未调用**它（iOS 调用了，见 `AppStore.swift`）。
+     * 保留而不删除，是为了兼容仍在跑的旧版网关——它们仍会发同 seq 的 chunk。
      *
      * 该路径只做行内变更：projector 用 per-key stream index 定位目标行，既不重建历史，
      * 也不重新序列化整个事件列表。缺少已建立基线的 projector 时 fail closed——
