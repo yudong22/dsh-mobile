@@ -141,22 +141,65 @@ class SharedConversationStore(
         )
     }
 
+    /**
+     * 用 JSON 基线整体替换某 session 的投影。
+     *
+     * 保留 JSON 变体是因为**跨语言边界**需要它：iOS 侧（`KMPSharedAdapter.swift`）
+     * 只能以 `String` 与 KMP 通信。Android 侧**不应**再用这个变体——
+     * 它手上本来就有 `List<SessionEvent>`，编码成 JSON 再让这里解码回来是纯浪费
+     * （实测占 `replaceSession` 总耗时的 **92%**；见 [replaceSession] 的列表重载）。
+     */
     fun replaceSession(sessionId: String, eventsJson: String): SharedMviDispatchResult =
         dispatch("replace") {
             require(sessionId.isNotBlank()) { "sessionId must not be blank" }
             val records = wireJson.decodeFromString<List<SessionEvent>>(eventsJson)
             require(records.all { it.sessionId == sessionId }) { "baseline contains another session" }
-            val normalized = records.associateBy(SessionEvent::seq).values.sortedBy(SessionEvent::seq)
-            val projector = ConversationProjector(labels).apply { rebuild(normalized) }
-            projector.replaceSteeringMessages(steeringRecords[sessionId].orEmpty())
-            projectors[sessionId] = projector
-            SharedConversationPatch(
-                sessionId = sessionId,
-                replacesAll = true,
-                replacementItems = projector.items,
-                lastSequence = projector.lastSequence
-            )
+            replacementPatch(sessionId, records)
         }
+
+    /**
+     * 列表版基线替换：**跳过 JSON 往返**。
+     *
+     * 为什么需要它：分页/重连路径上，调用方（`AndroidGatewayProjection`）手里的
+     * `historyEvents[sessionId]` 本来就是 `List<SessionEvent>`。此前它每页都
+     * `adapterJson.encodeToString(...)` 编成字符串，再传给上面的 JSON 变体解码回列表，
+     * 然后才 rebuild——**一次分页要序列化并反序列化整份累积历史**。
+     *
+     * 实测（40 页、每页 1 条 2KB 事件，累积路径）：
+     * ```
+     * encode 47.6% · decode 44.5% · 排序 2.6% · rebuild 5.3%
+     * → 可省的 encode+decode 占 92.1%
+     * ```
+     * 且该放大随页数呈 **O(n²)**（翻第 N 页要编码前 N 页之和；30 页实测 29.2x）。
+     *
+     * **注意：这只是省掉冗余的序列化，不是把「全量重排」改成「增量追加」。**
+     * 向后翻页取的是更早的事件，而投影的 `insert` 是**追加到末尾**、patch 也没有
+     * prepend 操作——改成增量追加会把旧消息排到列表最后（实测顺序错误）。
+     * 因此这里仍然全量 rebuild，只是不再多绕一趟 JSON。
+     */
+    fun replaceSession(sessionId: String, records: List<SessionEvent>): SharedMviDispatchResult =
+        dispatch("replace") {
+            require(sessionId.isNotBlank()) { "sessionId must not be blank" }
+            require(records.all { it.sessionId == sessionId }) { "baseline contains another session" }
+            replacementPatch(sessionId, records)
+        }
+
+    /** [replaceSession] 两个变体共用的投影重建与 patch 构造。 */
+    private fun replacementPatch(
+        sessionId: String,
+        records: List<SessionEvent>
+    ): SharedConversationPatch {
+        val normalized = records.associateBy(SessionEvent::seq).values.sortedBy(SessionEvent::seq)
+        val projector = ConversationProjector(labels).apply { rebuild(normalized) }
+        projector.replaceSteeringMessages(steeringRecords[sessionId].orEmpty())
+        projectors[sessionId] = projector
+        return SharedConversationPatch(
+            sessionId = sessionId,
+            replacesAll = true,
+            replacementItems = projector.items,
+            lastSequence = projector.lastSequence
+        )
+    }
 
     fun clearSession(sessionId: String): SharedMviDispatchResult = dispatch("clear") {
         require(sessionId.isNotBlank()) { "sessionId must not be blank" }

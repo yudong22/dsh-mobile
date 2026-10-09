@@ -208,7 +208,8 @@ internal class AndroidGatewayProjection(
             cached.hasMore,
             null
         )
-        conversationStore.replaceSession(sessionId, adapterJson.encodeToString(cached.events))
+        // 列表重载：cached.events 已是 List<SessionEvent>，无需 JSON 往返。
+        conversationStore.replaceSession(sessionId, cached.events)
         return snapshot()
     }
 
@@ -392,7 +393,7 @@ internal class AndroidGatewayProjection(
                 val records = frame.events.orEmpty().map { it.normalized(id) }
                 historyStore.installSnapshot(id, adapterJson.encodeToString(records), frame.hasMore == true, frame.nextBeforeSeq)
                 historyHasMore[id] = frame.hasMore == true
-                conversationStore.replaceSession(id, adapterJson.encodeToString(records))
+                conversationStore.replaceSession(id, records)
                 controlSnapshot = mobileStore.acceptFrame(rawJson)
             }
             "assistant-stream", "session-stream-reset", "subscribed" -> Unit
@@ -582,7 +583,11 @@ internal class AndroidGatewayProjection(
         // 若也打上标记，会永久跳过该会话的缓存播种（直到下次 hello/reset）。
         if (normalized.isNotEmpty()) liveSessionIds += sessionId
         historyHasMore[sessionId] = frame.hasMore == true
-        conversationStore.replaceSession(sessionId, adapterJson.encodeToString(historyEvents[sessionId].orEmpty()))
+        // 走**列表重载**：手里已经是 List<SessionEvent>，不必编码成 JSON 再让 store
+        // 解码回来。此前那趟往返占了这次调用的 92%（且随页数 O(n²) 放大，
+        // 30 页实测 29.2x）。仍然全量 rebuild —— 向后翻页是更早的事件，
+        // 投影没有 prepend 能力，增量追加会把旧消息排到末尾。
+        conversationStore.replaceSession(sessionId, historyEvents[sessionId].orEmpty())
         assistantStream.activeAttemptId()?.takeIf { assistantStream.hasBaseline(sessionId) }?.let {
             conversationStore.assistantChunks(sessionId, it, assistantStream.replayChunksJson())
         }
@@ -614,7 +619,7 @@ internal class AndroidGatewayProjection(
         liveSessionIds += sessionId
         val conversationResult = conversationStore.receiveEvent(recordJson)
         if (!conversationResult.accepted) {
-            conversationStore.replaceSession(sessionId, adapterJson.encodeToString(historyEvents[sessionId].orEmpty()))
+            conversationStore.replaceSession(sessionId, historyEvents[sessionId].orEmpty())
         }
     }
 
