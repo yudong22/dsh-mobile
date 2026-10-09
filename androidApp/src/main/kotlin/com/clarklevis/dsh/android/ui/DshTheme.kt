@@ -75,6 +75,16 @@ internal val DshPageHeaderHeight = 56.dp
 internal val DshPageHeaderCircleButtonSize = 46.dp
 internal val DshPageHeaderHorizontalPadding = 12.dp
 
+/**
+ * 底部导航栏几何：**内容高度**（不含系统导航栏 inset）。
+ *
+ * 从 84dp / 单项 72dp 调矮到 68dp / 58dp：底栏是常驻 chrome，此前占掉的高度
+ * 明显挤压内容区（任务详情页尤其明显）。图标同步 26→23dp、标签字号不变，
+ * 仍满足 44dp 最小触控目标（单项 58dp × 五等分宽度远大于 44dp）。
+ */
+internal val DshBottomBarHeight = 68.dp
+internal val DshBottomBarItemHeight = 58.dp
+
 /** 页头副标题字号（首页的「设备 | 项目」）。固定值，不做自适应降档。 */
 internal val DshHeaderSubtitleFontSize = 12.sp
 

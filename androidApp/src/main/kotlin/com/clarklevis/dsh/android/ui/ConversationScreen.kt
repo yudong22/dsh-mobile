@@ -177,12 +177,7 @@ import kotlinx.coroutines.withContext
 internal fun ConversationScreen(
     stateHolder: AndroidSharedStateHolder,
     onPickImage: () -> Unit,
-    onBack: () -> Unit,
-    // 任务详情页左上角是抽屉钮（而不是返回）：抽屉里可以直接切换任务，
-    // 比「先返回列表再进另一个任务」少一步。有默认值是因为两个设备测试
-    // 直接挂载本组件（ConversationKeyboardDeviceTest / ConversationHistoryRecoveryDeviceTest），
-    // 它们不关心抽屉。
-    onOpenDrawer: () -> Unit = {}
+    onBack: () -> Unit
 ) {
     val palette = dshPalette()
     val session = stateHolder.snapshot.sessions.firstOrNull { it.id == stateHolder.snapshot.selectedSessionId }
@@ -220,54 +215,32 @@ internal fun ConversationScreen(
     Scaffold(
         containerColor = palette.canvas,
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        title,
-                        color = palette.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                },
-                navigationIcon = {
-                    // 左上角是**抽屉钮**而不是返回键：任务详情是核心页面，
-                    // 抽屉里能直接切到别的任务（比返回列表再选更快）。
-                    // 返回仍可用系统返回手势/按键（见本函数开头的 BackHandler 语义）。
-                    Box(Modifier.padding(start = 8.dp, end = 14.dp)) {
-                        DshDrawerButton(
-                            onClick = {
-                                dismissInput()
-                                onOpenDrawer()
-                            },
-                            size = 40.dp,
-                            testTag = "conversation-drawer-button"
-                        )
-                    }
+            // 页头直接复用 DshPageHeader：与首页/项目/定时任务/设置**完全同一几何**
+            // （56dp 高、46dp 圆钮、18sp 居中标题）。此前这里用 Material 的 TopAppBar
+            // + expandedHeight 80dp，页头比列表页高出一截，切页面时明显跳动。
+            DshPageHeader(
+                title = title,
+                onBack = {
+                    dismissInput()
+                    onBack()
                 },
                 actions = {
-                    Row(
-                        modifier = Modifier.padding(start = 12.dp, end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        SmallConnectionDot(stateHolder.gatewayState.connection)
-                        Text(
-                            agentPresetDisplayName(agentPresetId, agentPresetName),
-                            color = palette.textSecondary,
-                            fontSize = 12.sp
-                        )
-                        ConversationMoreMenu(
-                            canBrowseFiles = stateHolder.snapshot.selectedSessionId != null &&
-                                stateHolder.gatewayState.connection == GatewayConnectionState.CONNECTED &&
-                                "file-downloads" in stateHolder.gatewayState.capabilities,
-                            onBrowseFiles = { showWorkspaceFiles = true }
-                        )
-                    }
-                },
-                expandedHeight = 80.dp,
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                    ConversationMoreMenu(
+                        canBrowseFiles = stateHolder.snapshot.selectedSessionId != null &&
+                            stateHolder.gatewayState.connection == GatewayConnectionState.CONNECTED &&
+                            "file-downloads" in stateHolder.gatewayState.capabilities,
+                        onBrowseFiles = { showWorkspaceFiles = true },
+                        // 对话 / 轨迹 折进「更多」：它们原先以分段控件形式常驻在页头下方，
+                        // 一直占掉一行可视高度，而多数时间用户只看「对话」。
+                        selectedPage = pagerState.currentPage,
+                        onSelectPage = { target ->
+                            dismissInput()
+                            scope.launch { pagerState.animateScrollToPage(target) }
+                        },
+                        agentPresetLabel = agentPresetDisplayName(agentPresetId, agentPresetName),
+                        connection = stateHolder.gatewayState.connection
+                    )
+                }
             )
         }
     ) { padding ->
@@ -277,10 +250,6 @@ internal fun ConversationScreen(
                 .padding(padding)
                 .consumeWindowInsets(padding)
         ) {
-            SegmentedControl(pagerState.currentPage) { target ->
-                dismissInput()
-                scope.launch { pagerState.animateScrollToPage(target) }
-            }
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
@@ -349,10 +318,23 @@ internal fun TopBarCircleButton(
     }
 }
 
+/**
+ * 页头「更多」菜单：任务详情页的全部次级操作都收在这里。
+ *
+ * 为什么把「对话 / 轨迹」也折进来：它们原本是页头下方的常驻分段控件，**永久占掉一行
+ * 可视高度**，而绝大多数时间用户只看对话。折进菜单后首屏全部留给内容。
+ *
+ * 菜单里带当前状态（哪个页签被选中）与连接状态——原来是直接画在页头上的，
+ * 收进菜单后不能丢掉这些信息。
+ */
 @Composable
 internal fun ConversationMoreMenu(
     canBrowseFiles: Boolean,
-    onBrowseFiles: () -> Unit
+    onBrowseFiles: () -> Unit,
+    selectedPage: Int = 0,
+    onSelectPage: (Int) -> Unit = {},
+    agentPresetLabel: String? = null,
+    connection: GatewayConnectionState? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
     val palette = dshPalette()
@@ -376,13 +358,59 @@ internal fun ConversationMoreMenu(
                 palette.cardBorder
             )
         ) {
+            // 视图切换：勾选当前页签，点击即切。
+            ConversationMoreMenuItem(
+                title = "对话",
+                iconRes = R.drawable.ic_tab_tasks,
+                selected = selectedPage == 0,
+                testTag = "conversation-more-page-0"
+            ) {
+                expanded = false
+                onSelectPage(0)
+            }
+            ConversationMoreMenuItem(
+                title = "轨迹",
+                iconRes = R.drawable.ic_drawer_schedule,
+                selected = selectedPage == 1,
+                testTag = "conversation-more-page-1"
+            ) {
+                expanded = false
+                onSelectPage(1)
+            }
+            HorizontalDivider(color = palette.divider)
             ConversationMoreMenuItem(
                 title = "工作区文件",
                 iconRes = R.drawable.ic_folder_outline,
-                enabled = canBrowseFiles
+                enabled = canBrowseFiles,
+                testTag = "conversation-more-files"
             ) {
                 expanded = false
                 onBrowseFiles()
+            }
+            // 原先画在页头右侧的信息：连接状态与 Agent 预设。收进菜单后仍然可见，
+            // 否则「当前用的是哪个预设」在详情页就无处可查了。
+            if (agentPresetLabel != null || connection != null) {
+                HorizontalDivider(color = palette.divider)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (connection != null) {
+                        StatusIndicatorDot(
+                            color = dshConnectionDotColor(connection, palette),
+                            modifier = Modifier.size(7.dp),
+                            glowing = connection == GatewayConnectionState.CONNECTED
+                        )
+                    }
+                    Text(
+                        text = agentPresetLabel.orEmpty(),
+                        color = palette.textSecondary,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
@@ -392,73 +420,47 @@ internal fun ConversationMoreMenu(
 private fun ConversationMoreMenuItem(
     title: String,
     iconRes: Int,
-    enabled: Boolean,
+    enabled: Boolean = true,
+    selected: Boolean = false,
+    testTag: String? = null,
     onClick: () -> Unit
 ) {
+    val palette = dshPalette()
     DropdownMenuItem(
         text = {
             Text(
                 title,
-                color = dshPalette().textPrimary,
+                color = if (selected) palette.primary else palette.textPrimary,
                 fontSize = 17.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
             )
         },
         leadingIcon = {
             Icon(
                 painter = painterResource(iconRes),
                 contentDescription = null,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(22.dp),
+                tint = if (selected) palette.primary else palette.textPrimary
             )
         },
-        modifier = Modifier.height(58.dp),
+        // 选中态用勾号表达：否则「当前在对话还是轨迹」在菜单里读不出来。
+        trailingIcon = if (selected) {
+            {
+                Icon(
+                    painter = painterResource(R.drawable.ic_menu_check),
+                    contentDescription = "当前视图",
+                    modifier = Modifier.size(20.dp),
+                    tint = palette.primary
+                )
+            }
+        } else null,
+        modifier = Modifier.height(58.dp).then(
+            if (testTag != null) Modifier.testTag(testTag) else Modifier
+        ),
         enabled = enabled,
         contentPadding = PaddingValues(horizontal = 20.dp),
         onClick = onClick
     )
-}
-
-@Composable
-private fun SegmentedControl(selected: Int, onSelect: (Int) -> Unit) {
-    val palette = dshPalette()
-    val trackShape = RoundedCornerShape(16.dp)
-    val segmentShape = RoundedCornerShape(14.dp)
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 66.dp, vertical = 6.dp)
-            .height(32.dp)
-            .clip(trackShape)
-            .background(palette.surfaceMuted)
-            .padding(2.dp)
-    ) {
-        listOf("对话", "轨迹").forEachIndexed { index, title ->
-            val isSelected = selected == index
-            Box(
-                Modifier.weight(1f).fillMaxHeight().clip(segmentShape)
-                    .background(if (isSelected) palette.surface else Color.Transparent)
-                    .then(
-                        if (isSelected) {
-                            Modifier.border(
-                                0.5.dp,
-                                palette.cardBorder,
-                                segmentShape
-                            )
-                        } else {
-                            Modifier
-                        }
-                    )
-                    .clickable { onSelect(index) }
-                    .semantics { contentDescription = title },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    title,
-                    color = if (isSelected) palette.primary else palette.textSecondary,
-                    fontSize = 13.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                )
-            }
-        }
-    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)

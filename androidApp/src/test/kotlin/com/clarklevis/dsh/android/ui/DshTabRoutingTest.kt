@@ -24,15 +24,19 @@ class DshTabRoutingTest {
         assertEquals(DshTab.SETTINGS, dshTabForRoute("settings"))
     }
 
-    /** 会话详情归入「任务列表」：它是某条任务的详情，不是独立目的地。 */
+    /**
+     * 任务详情页**不挂底栏**：它是下钻页，底栏那一条高度全部还给对话内容。
+     * （v1.9.4 起；此前它归入「任务列表」Tab 并显示底栏。）
+     */
     @Test
-    fun conversationDetailHighlightsTheTasksTab() {
-        assertEquals(DshTab.TASKS, dshTabForRoute("conversation"))
+    fun conversationDetailHasNoBottomBar() {
+        assertNull(dshTabForRoute("conversation"))
     }
 
     /** 二级下钻页没有底栏。 */
     @Test
     fun drillDownPagesHaveNoBottomBar() {
+        assertNull(dshTabForRoute("conversation"))
         assertNull(dshTabForRoute("plugins"))
         assertNull(dshTabForRoute("settings/agent-presets"))
         assertNull(dshTabForRoute("settings/default-model"))
@@ -52,7 +56,7 @@ class DshTabRoutingTest {
     /**
      * 进入/离开会话详情仍是下钻：必须保留滑动。
      *
-     * 会话页虽挂底栏（归在「任务列表」下），但不能因此被当成平级目的地——
+     * 会话页已不挂底栏，但进入/离开它仍是下钻，不能因此被当成平级目的地——
      * 那会把「进入任务」变成瞬移，丢掉层级反馈。
      */
     @Test

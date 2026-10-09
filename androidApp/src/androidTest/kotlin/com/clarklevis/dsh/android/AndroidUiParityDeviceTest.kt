@@ -232,7 +232,7 @@ class AndroidUiParityDeviceTest {
     /**
      * 底栏的内容区必须容得下每一项（[DshTabItem] 固定 72dp）。
      *
-     * 回归自真机 bug：`DshBottomTabBar` 曾把 `height(84.dp)` 写在 `navigationBarsPadding()`
+     * 回归自真机 bug：`DshBottomTabBar` 曾把 `height(...)` 写在 `navigationBarsPadding()`
      * 之后，使 84dp 成为**含 inset 的总高**。真机导航栏 inset 为 20dp 时内容区只剩 64dp，
      * 小于 72dp，于是图标与标签被裁到屏幕外（真机上只剩「任务」两个字）。
      *
@@ -246,9 +246,10 @@ class AndroidUiParityDeviceTest {
         val barHeight = compose.onNodeWithTag("bottom-tab-bar")
             .fetchSemanticsNode().size.height
 
-        // DshTabItem 使用 Modifier.height(72.dp)；底栏内容区必须不低于它，
+        // DshTabItem 使用 Modifier.height(58.dp)（DshBottomBarItemHeight）；
+        // 底栏内容区必须不低于它，
         // 否则每项都会被裁掉一截。dp→px 用设备自身密度换算。
-        val requiredPx = with(compose.density) { 72.dp.roundToPx() }
+        val requiredPx = with(compose.density) { 58.dp.roundToPx() }
         assertTrue(
             "底栏高度($barHeight px)小于单项所需($requiredPx px)，标签会被裁切",
             barHeight >= requiredPx

@@ -81,16 +81,16 @@ internal fun DshBottomTabBar(
 ) {
     val palette = dshPalette()
     // 顺序很关键：`navigationBarsPadding()` 必须在 `height()` 之前、且在**外层**应用，
-    // 让 84dp 是「内容高度」，系统导航栏 inset 额外加在下方。
+    // 让 [DshBottomBarHeight] 是「内容高度」，系统导航栏 inset 额外加在下方。
     //
-    // 反例（曾导致真机上底栏只剩一个标签）：`.navigationBarsPadding().height(84.dp)`
-    // 让 84dp 成为「含 inset 的总高」。真机导航栏 inset 为 20dp（60px @3.0x）时内容区
-    // 只剩 64dp，而 DshTabItem 需要 72dp，于是图标与文字被裁到屏幕外。
+    // 反例（曾导致真机上底栏只剩一个标签）：`.navigationBarsPadding().height(...)`
+    // 让内容高度成为「含 inset 的总高」。真机导航栏 inset 为 20dp（60px @3.0x）时
+    // 内容区只剩 64dp，小于 DshTabItem 需要的高度，于是图标与文字被裁到屏幕外。
     Box(modifier.fillMaxWidth().background(palette.canvas).navigationBarsPadding()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(84.dp)
+                .height(DshBottomBarHeight)
                 .padding(horizontal = 4.dp)
                 .testTag("bottom-tab-bar"),
             verticalAlignment = Alignment.CenterVertically
@@ -120,7 +120,7 @@ private fun DshTabItem(
     val tint = if (selected) palette.textPrimary else palette.textTertiary
     Column(
         modifier = modifier
-            .height(72.dp)
+            .height(DshBottomBarItemHeight)
             .clickable(role = Role.Tab, onClick = onClick)
             .semantics {
                 this.selected = selected
@@ -133,7 +133,8 @@ private fun DshTabItem(
         Image(
             painter = painterResource(tab.iconRes),
             contentDescription = null,
-            modifier = Modifier.size(26.dp),
+            // 26 -> 23dp：底栏整体调矮后��标需同步收小，否则与标签挤在一起。
+            modifier = Modifier.size(23.dp),
             colorFilter = ColorFilter.tint(tint)
         )
         Text(

@@ -248,12 +248,11 @@ internal fun DshProductApp(
                         Modifier
                     }
                 ),
-                // 底栏切换是「平级跳转」，不该有横向滑入动画：那是下钻（进入详情）的语义，
-                // 用在平级切换上会让人以为进了一层。这里按**起止路由是否都是 Tab 目的地**
-                // 判定（而不是按单个目的地），因此：
-                // - 首页 ↔ 项目/定时任务/设置：瞬时切换（点 2）；
-                // - 首页 → 会话详情：保留左滑（真实下钻）；
-                // - 会话详情 → 返回：保留右滑。
+                // 底栏切换**一律无横向动画**：四个 Tab 是平级目的地，左右滑动是
+                // 「进入下一层」的语义，用在平级切换上会让人以为进了一层。
+                // 判据是「起止路由都是 Tab 根目的地」——不依赖具体的选中项，
+                // 因此任何两个 Tab 之间互切都是瞬时。
+                // 详情页（下钻）不在 [TAB_ROOT_ROUTES] 内，进出仍保留滑动语义。
                 enterTransition = {
                     if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
                         EnterTransition.None
@@ -307,8 +306,7 @@ internal fun DshProductApp(
                     ConversationScreen(
                         stateHolder = stateHolder,
                         onPickImage = onPickImage,
-                        onBack = navController::popBackStack,
-                        onOpenDrawer = openDrawer
+                        onBack = navController::popBackStack
                     )
                 }
                 composable(ROUTE_SETTINGS) {
@@ -418,14 +416,16 @@ internal fun DshProductApp(
 /**
  * 路由 → 底栏选中项。返回 `null` 表示该路由是二级下钻页，不显示底栏。
  *
- * 会话页归入「任务列表」：它是任务列表里某一条任务的详情，不是独立目的地。
- * （因此它虽然显示底栏，却**不算**平级 Tab 目的地——见 [isTabToTab]。）
+ * 任务详情页是**下钻页**，不返回 Tab（因此也不挂底栏，见下方 [dshTabForRoute]）。
  */
 internal fun dshTabForRoute(route: String?): DshTab? = when (route) {
-    ROUTE_WORKSPACE, ROUTE_CONVERSATION -> DshTab.TASKS
+    ROUTE_WORKSPACE -> DshTab.TASKS
     ROUTE_PROJECTS -> DshTab.PROJECTS
     ROUTE_SCHEDULED_TASKS -> DshTab.SCHEDULES
     ROUTE_SETTINGS -> DshTab.SETTINGS
+    // 任务详情页**不挂底栏**：它是下钻页（返回按钮在页头左上角），
+    // 底栏占掉的 60+dp 全部还给对话内容。任务间切换走返回列表再进，
+    // 或直接用系统返回手势退出详情。
     else -> null
 }
 
@@ -450,8 +450,8 @@ internal fun requiresConversationNavigation(currentRoute: String?): Boolean =
 /**
  * 两个路由之间是否属于「底栏平级切换」——决定要不要播放横向滑动动画。
  *
- * 判据是**两端都是 Tab 根目的地且不相同**。刻意不包含会话页：虽然它挂底栏
- * （归在「任务列表」下），但进入它是下钻，应当保留滑动语义。
+ * 判据是**两端都是 Tab 根目的地且不相同**。会话页不在其中：它是下钻页，
+ * 进出都应保留滑动语义。
  */
 internal fun isTabToTab(from: String?, to: String?): Boolean =
     from != null && to != null && from != to && from in TAB_ROOT_ROUTES && to in TAB_ROOT_ROUTES
