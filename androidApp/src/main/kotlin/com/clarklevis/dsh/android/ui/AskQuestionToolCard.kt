@@ -246,6 +246,7 @@ private fun QuestionCardFooter(
     onNext: () -> Unit,
     onSubmit: () -> Unit
 ) {
+    val palette = dshPalette()
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(9.dp)
@@ -261,7 +262,7 @@ private fun QuestionCardFooter(
                 .weight(1f)
                 .height(44.dp)
                 .clip(RoundedCornerShape(13.dp))
-                .background(if (isSubmitting) DshColors.Ocean.copy(alpha = 0.45f) else DshColors.Ocean)
+                .background(if (isSubmitting) palette.primary.copy(alpha = 0.45f) else palette.primary)
                 .clickable(enabled = !isSubmitting, onClick = action)
                 .testTag(if (isLast) "ask-question-submit" else "ask-question-next"),
             horizontalArrangement = Arrangement.Center,
@@ -269,7 +270,7 @@ private fun QuestionCardFooter(
         ) {
             Text(
                 label,
-                color = MaterialTheme.colorScheme.onPrimary,
+                color = palette.onPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold
             )

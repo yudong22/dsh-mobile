@@ -800,8 +800,10 @@ private fun QuestionFooter(
                     .testTag("question-submit"),
                 shape = RoundedCornerShape(21.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = DshColors.Ocean,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
+                    // 容器与文字必须取自同一套 palette：固定 Ocean 配暗色 onPrimary
+                    // 实测对比度约 3.53:1（低于 4.5:1）。改用主题主色成对取值。
+                    containerColor = dshPalette().primary,
+                    contentColor = dshPalette().onPrimary
                 ),
                 contentPadding = ButtonDefaults.ContentPadding
             ) {

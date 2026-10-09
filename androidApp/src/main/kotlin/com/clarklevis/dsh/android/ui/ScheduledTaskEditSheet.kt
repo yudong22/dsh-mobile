@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -28,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -56,13 +58,15 @@ internal fun ScheduledTaskEditSheet(
     val palette = dshPalette()
     val repeating = task.kind !in setOf("at", "after")
     val zone = remember(task.id) { TimeZone.getTimeZone(task.raw["timeZone"]?.stringValue ?: TimeZone.getDefault().id) }
-    var title by remember(task.id) { mutableStateOf(task.title) }
-    var prompt by remember(task.id) { mutableStateOf(task.prompt) }
-    var useSpecificDate by remember(task.id) { mutableStateOf(!repeating) }
-    var selectedDate by remember(task.id) { mutableStateOf(parseScheduleInstant(task.scheduledAt) ?: Date(System.currentTimeMillis() + 3_600_000)) }
-    var selectedTime by remember(task.id) { mutableStateOf(initialScheduleClock(task, zone)) }
-    var pendingRequestId by remember(task.id) { mutableStateOf<String?>(null) }
-    var localError by remember(task.id) { mutableStateOf<String?>(null) }
+    // 草稿必须 rememberSaveable：这是用户正在输入的内容，旋转屏幕或进程回收就丢掉，
+    // 等于「写了一半被吞了」。对照 DshRuntimeSettingsSheet.kt 里对同一问题的处理。
+    var title by rememberSaveable(task.id) { mutableStateOf(task.title) }
+    var prompt by rememberSaveable(task.id) { mutableStateOf(task.prompt) }
+    var useSpecificDate by rememberSaveable(task.id) { mutableStateOf(!repeating) }
+    var selectedDate by rememberSaveable(task.id) { mutableStateOf(parseScheduleInstant(task.scheduledAt) ?: Date(System.currentTimeMillis() + 3_600_000)) }
+    var selectedTime by rememberSaveable(task.id) { mutableStateOf(initialScheduleClock(task, zone)) }
+    var pendingRequestId by rememberSaveable(task.id) { mutableStateOf<String?>(null) }
+    var localError by rememberSaveable(task.id) { mutableStateOf<String?>(null) }
     val timeChange = scheduleTimingChange(task, useSpecificDate, selectedDate, selectedTime, zone, repeating)
     val cleanTitle = title.trim()
     val cleanPrompt = prompt.trim()
@@ -88,8 +92,12 @@ internal fun ScheduledTaskEditSheet(
         scrimColor = Color.Black.copy(alpha = if (palette.isDark) 0.42f else 0.22f)
     ) {
         Column(
-            Modifier.fillMaxWidth().navigationBarsPadding().verticalScroll(rememberScrollState())
-                .padding(start = 20.dp, end = 20.dp, top = 20.dp),
+            Modifier.fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, top = 20.dp)
+                // imePadding 让键盘把输入区顶上来；navigationBarsPadding 已被
+                // imePadding 覆盖（键盘与导航栏共用同一块 inset），叠加会多出一截空白。
+                .imePadding(),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             Row(

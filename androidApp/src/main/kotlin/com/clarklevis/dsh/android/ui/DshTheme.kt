@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
 /**
@@ -35,6 +36,26 @@ import androidx.core.view.WindowCompat
  * 写死自己的值（按钮此前是 `height / 2` 的全圆角，看起来来自另一套体系）。
  */
 internal val DshCardCornerRadius = RoundedCornerShape(20.dp)
+
+/**
+ * 卡片体系的标准**间距**：页面水平留白与区块间距。
+ *
+ * 此前这些值散落在每个页面的 `padding(horizontal = 18.dp)` 与各类 `Spacer(height(20.dp))`
+ * 里，互相抄各自的数字，导致首页 18dp、设置页 20dp、定时任务 20dp 三种 gutter 并存。
+ * 抽出来之后，调整整页留白只需改一处。
+ */
+internal val DshScreenHorizontalPadding = 18.dp
+internal val DshSectionSpacing = 20.dp
+
+/**
+ * 卡片体系的标准**字号**。
+ *
+ * 页面标题 / 区块标题 / 正文 / 辅助文字四级。此前同为「区块标题」的文案在首页是
+ * 17sp、项目页 15sp、设置页 17sp，视觉密度不一致。
+ */
+internal val DshSectionTitleFontSize = 17.sp
+internal val DshBodyFontSize = 15.sp
+internal val DshCaptionFontSize = 13.sp
 
 /**
  * 品牌色与固定语义色。
@@ -120,6 +141,15 @@ internal data class DshPalette(
 
     /** 卡片描边：浅色下几乎不可见，深色下用更亮的边。 */
     val cardBorder: Color get() = border
+
+    /**
+     * 叠在 [primary] 之上的前景色，与 [primary] **成对**取值。
+     *
+     * 与 [paletteColorScheme] 的 onPrimary 同一推导，抽出来是为了让「主色容器 + 主色上的
+     * 文字」这类配对必须同时取自 palette：此前按钮用固定 `DshColors.Ocean` 当容器、
+     * 却拿主题 `onPrimary` 当文字，暗色下对比度只有约 3.53:1。
+     */
+    val onPrimary: Color get() = if (isDark) surface else Color.White
 }
 
 internal object DshPalettes {

@@ -61,7 +61,7 @@ internal fun homeRecentSessions(scopedSessions: List<SessionSummary>): List<Sess
  * [allSessions] 是**已按当前项目过滤**的完整列表，本区块只排序、不再截断。
  *
  * 三种态各有明确文案，不留空白：
- *  - 已连接但当前项目没有会话 → 「当前项目还没有会话…」；
+ *  - 已连接但当前项目没有任务 → 「当前项目还没有任务…」；
  *  - 连接中且列表为空（尚无离线缓存播种）→ 进度文案，不能说成「没有会话」；
  *  - 未连接但有缓存/历史会话 → 照常展示，标题右侧标成「离线」而不是「已连接」。
  *
@@ -116,9 +116,9 @@ internal fun HomeRecentSessions(
             LazyColumn(
                 // weight(1f)：吃掉标题行之后的剩余高度，让列表卡撑满底栏上方的空间。
                 modifier = Modifier.fillMaxWidth().weight(1f)
-                    .background(palette.surface, RoundedCornerShape(20.dp))
-                    .border(1.dp, palette.cardBorder, RoundedCornerShape(20.dp))
-                    .clip(RoundedCornerShape(20.dp))
+                    .background(palette.surface, DshCardCornerRadius)
+                    .border(1.dp, palette.cardBorder, DshCardCornerRadius)
+                    .clip(DshCardCornerRadius)
                     .testTag("home-session-list"),
                 contentPadding = PaddingValues(bottom = 4.dp),
                 // 抽屉横向拖动期间交出滚动权：否则在手势仲裁里和抽屉抢同一次拖动。
@@ -212,8 +212,8 @@ private fun HomeRecentEmptyState(connection: GatewayConnectionState) {
     }
     Box(
         modifier = Modifier.fillMaxWidth()
-            .background(palette.surface, RoundedCornerShape(20.dp))
-            .border(1.dp, palette.cardBorder, RoundedCornerShape(20.dp))
+            .background(palette.surface, DshCardCornerRadius)
+            .border(1.dp, palette.cardBorder, DshCardCornerRadius)
             .padding(horizontal = 16.dp, vertical = 18.dp)
             .testTag("home-recent-empty"),
         contentAlignment = Alignment.CenterStart

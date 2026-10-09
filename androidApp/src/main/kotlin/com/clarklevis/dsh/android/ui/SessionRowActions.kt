@@ -89,10 +89,10 @@ internal fun SessionRowActions(
     )
     if (archiving) AlertDialog(
         onDismissRequest = { archiving = false },
-        title = { Text("删除会话？") },
-        text = { Text("会话将被归档并从列表隐藏，历史记录会保留。") },
+        title = { Text("归档这条任务？") },
+        text = { Text("归档后会从任务列表隐藏，历史记录会保留，可随时恢复。") },
         confirmButton = {
-            TextButton(onClick = { onArchive(session.id); archiving = false }) { Text("删除") }
+            TextButton(onClick = { onArchive(session.id); archiving = false }) { Text("归档") }
         },
         dismissButton = { TextButton(onClick = { archiving = false }) { Text("取消") } }
     )

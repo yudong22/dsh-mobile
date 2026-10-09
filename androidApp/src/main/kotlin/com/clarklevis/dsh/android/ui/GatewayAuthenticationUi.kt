@@ -339,7 +339,7 @@ internal fun ManualGatewayPairingSheet(
 @Composable
 private fun PairingTextEditor(value: String, onValueChange: (String) -> Unit) {
     val palette = dshPalette()
-    val shape = RoundedCornerShape(20.dp)
+    val shape = DshCardCornerRadius
     BasicTextField(
         value = value,
         onValueChange = onValueChange,

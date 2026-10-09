@@ -173,7 +173,7 @@ internal fun WorkspaceDrawer(
                     .then(if (drawerOpened) Modifier else Modifier.clearAndSetSemantics {})
             ) {
                 // 设备行：图标（右上角状态点）+ 主机名 + 状态副标题 + 展开箭头。
-                // 点击展开设备下拉：切换已配对设备，或「新增匹配」进入扫码 / 手动配对。
+                // 点击展开设备下拉：切换已配对设备，或「配对新设备」进入扫码 / 手动配对。
                 // 连接中禁止切换设备：此时 activeGraph 正在换代，切换会与握手竞争。
                 var deviceMenuExpanded by remember { mutableStateOf(false) }
                 val connectionTitle = dshConnectionDetailText(connection)
@@ -343,10 +343,25 @@ internal fun WorkspaceDrawer(
                                         )
                                     }
                                 } else {
+                                    // 空态必须按连接相位区分：原先只有两分支，FAILED /
+                                    // WAITING_FOR_NETWORK（ATTENTION 相位）会落到「暂无会话」，
+                                    // 而设备行同屏却显示「连接失败」——自相矛盾。
+                                    // 首页同相位早有正确文案（homeConnectionBadge / 四分支空态），
+                                    // 这里直接复用同一套语义。
+                                    val message = when (connection.dshPhase) {
+                                        DshConnectionPhase.ONLINE -> "当前项目还没有任务，点上方「新建任务」开始一个。"
+                                        DshConnectionPhase.IN_PROGRESS ->
+                                            dshConnectionDetailText(connection) ?: "正在连接…"
+                                        DshConnectionPhase.ATTENTION ->
+                                            "${dshConnectionDetailText(connection)}，恢复连接后这里会显示任务。"
+                                        DshConnectionPhase.IDLE ->
+                                            "连接设备后，这里会按最近活动时间列出当前项目的任务。"
+                                    }
                                     Text(
-                                        "暂无会话",
+                                        message,
                                         color = palette.textTertiary,
                                         fontSize = 15.sp,
+                                        lineHeight = 21.sp,
                                         modifier = Modifier.padding(horizontal = 30.dp, vertical = 10.dp)
                                     )
                                 }
@@ -681,7 +696,7 @@ internal data class DrawerDeviceOption(
     val selected: Boolean
 )
 
-/** 设备下拉：列出已配对设备 + 末尾「新增匹配」。 */
+/** 设备下拉：列出已配对设备 + 末尾「配对新设备」。 */
 @Composable
 private fun DeviceDropdown(
     expanded: Boolean,
@@ -761,7 +776,7 @@ private fun DeviceDropdown(
         }
         HorizontalDivider(color = palette.divider)
         DropdownMenuItem(
-            text = { Text("新增匹配", color = palette.primary, fontSize = 16.sp) },
+            text = { Text("配对新设备", color = palette.primary, fontSize = 16.sp) },
             leadingIcon = {
                 Image(
                     painter = painterResource(R.drawable.ic_add),

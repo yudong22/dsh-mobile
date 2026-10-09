@@ -126,7 +126,7 @@ private fun TaskPanel(
     expanded: Boolean,
     onExpandedChange: () -> Unit
 ) {
-    val shape = RoundedCornerShape(20.dp)
+    val shape = DshCardCornerRadius
     val palette = dshPalette()
     val arrowRotation by animateFloatAsState(
         targetValue = if (expanded) 0f else 180f,
@@ -245,7 +245,7 @@ private fun GoalPanel(
     onEdit: () -> Unit,
     onClear: () -> Unit
 ) {
-    val shape = RoundedCornerShape(20.dp)
+    val shape = DshCardCornerRadius
     // 与 Composer 使用相同的底色透明度，保证任务与目标区块不会透出聊天内容。
     val panelSurface = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
     val palette = dshPalette()

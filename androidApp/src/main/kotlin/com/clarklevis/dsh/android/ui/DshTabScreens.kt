@@ -99,7 +99,7 @@ internal fun ProjectsTabScreen(
             item {
                 ProjectCard(
                     title = "未分组",
-                    detail = "$ungroupedSessionCount 个未归属会话",
+                    detail = "$ungroupedSessionCount 个未归属任务",
                     selected = stateHolder.isUngroupedWorkspaceSelected,
                     testTag = "project-card-ungrouped",
                     onClick = {
@@ -172,11 +172,11 @@ private fun ProjectCard(
     val palette = dshPalette()
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(palette.surface, RoundedCornerShape(20.dp))
+            .background(palette.surface, DshCardCornerRadius)
             .border(
                 if (selected) 1.5.dp else 1.dp,
                 if (selected) palette.primary else palette.cardBorder,
-                RoundedCornerShape(20.dp)
+                DshCardCornerRadius
             )
             .clickable(onClick = onClick)
             .semantics { this.selected = selected }

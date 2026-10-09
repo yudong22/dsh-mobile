@@ -47,8 +47,11 @@ internal fun SessionContextMenu(
     onArchive: () -> Unit
 ) {
     if (!expanded) return
+    val palette = dshPalette()
     val margin = with(LocalDensity.current) { 8.dp.roundToPx() }
     val positionProvider = remember(margin) { SessionMenuPositionProvider(margin) }
+    // 面板配色必须走 palette：原先硬编码浅蓝 `0xF5BECADF` + 深字，深色模式下弹出的
+    // 仍是一个亮面板，与全 App 的暗色体系冲突（首页与抽屉共用此菜单）。
     Popup(
         popupPositionProvider = positionProvider,
         onDismissRequest = onDismissRequest,
@@ -59,19 +62,22 @@ internal fun SessionContextMenu(
             Surface(
                 modifier = Modifier.width(260.dp).testTag("session-context-menu"),
                 shape = RoundedCornerShape(32.dp),
-                color = Color(0xF5BECADF),
-                contentColor = Color(0xFF17202D),
-                border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.38f)),
+                color = palette.surface,
+                contentColor = palette.textPrimary,
+                border = BorderStroke(0.8.dp, palette.cardBorder),
                 tonalElevation = 0.dp,
                 shadowElevation = 16.dp
             ) {
                 Column(
                     Modifier.background(
-                        Brush.linearGradient(listOf(Color.White.copy(alpha = 0.15f), Color.Transparent))
+                        Brush.linearGradient(listOf(Color.White.copy(alpha = if (palette.isDark) 0.06f else 0.15f), Color.Transparent))
                     ).padding(vertical = 8.dp)
                 ) {
-                    SessionMenuAction("重命名", R.drawable.ic_session_rename, Color(0xFF17202D), onRename)
-                    SessionMenuAction("删除（归档）", R.drawable.ic_session_archive, Color(0xFFFF3B30), onArchive)
+                    // 删除色用语义分档的 DangerLight/Danger：`Danger` 在浅色底只有 3.55:1，
+                    // 当作正文色时必须用分档值（DshTheme.kt 对 DshColors.Danger 的说明）。
+                    val destructiveColor = if (palette.isDark) DshColors.DangerDark else DshColors.DangerLight
+                    SessionMenuAction("重命名", R.drawable.ic_session_rename, palette.textPrimary, onRename)
+                    SessionMenuAction("归档", R.drawable.ic_session_archive, destructiveColor, onArchive)
                 }
             }
         }

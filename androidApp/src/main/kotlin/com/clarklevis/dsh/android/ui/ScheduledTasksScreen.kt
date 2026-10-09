@@ -331,15 +331,15 @@ private fun ScheduledTaskCard(
             Modifier.fillMaxWidth()
                 .offset { IntOffset(offsetPx.roundToInt(), 0) }
                 .dropShadow(
-                    shape = RoundedCornerShape(28.dp),
+                    shape = DshCardCornerRadius,
                     shadow = Shadow(
                         radius = 14.dp,
                         color = palette.floatingShadow,
                         offset = DpOffset(0.dp, 4.dp)
                     )
                 )
-                .background(palette.surface, RoundedCornerShape(28.dp))
-                .border(1.dp, palette.cardBorder, RoundedCornerShape(28.dp))
+                .background(palette.surface, DshCardCornerRadius)
+                .border(1.dp, palette.cardBorder, DshCardCornerRadius)
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = rememberDraggableState { delta ->
@@ -442,8 +442,48 @@ private fun shortRule(task: MobileScheduledTask): String = when (task.kind) {
     "daily" -> "每天"
     "weekly" -> "每周"
     "every" -> "每 ${duration(task.raw["everySeconds"]?.doubleValue?.toInt() ?: 0)}"
-    "cron" -> "Cron"
+    "cron" -> "按计划"
     else -> "一次"
+}
+
+/**
+ * Cron 表达式的**人话释义**。
+ *
+ * 原先直接把 `0 9 * * 1` 这样的原文吐给用户（`shortRule` 只显示"Cron"），普通用户无法
+ * 从中判断任务什么时候跑。这里覆盖最常见的五个字段位；解析不了时才回退到原文，
+ * 保证不猜错。
+ */
+private fun cronDescription(expression: String): String? {
+    val fields = expression.trim().split(Regex("\\s+"))
+    if (fields.size != 5) return null
+    // cron 顺序是 分 时 日 月 周
+    val minuteField = fields[0]
+    val hourField = fields[1]
+    val dayOfMonthField = fields[2]
+    val monthField = fields[3]
+    val dayOfWeekField = fields[4]
+    if (monthField != "*" || dayOfMonthField != "*") return null
+    val dayPart = when (dayOfWeekField) {
+        "*", "?" -> null
+        "1-5", "MON-FRI" -> "工作日"
+        "0,6", "6,0", "SUN,SAT" -> "周末"
+        else -> {
+            val names = listOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
+            val parts = dayOfWeekField.split(",")
+            parts.mapNotNull { it.toIntOrNull() }
+                .takeIf { it.size == parts.size && it.isNotEmpty() }
+                ?.mapNotNull { names.getOrNull(it % 7) }
+                ?.joinToString("、")
+                ?: return null
+        }
+    }
+    val hour = hourField.toIntOrNull() ?: return null
+    val minute = minuteField.toIntOrNull() ?: return null
+    val timePart = "%02d:%02d".format(hour, minute)
+    return when (dayPart) {
+        null -> "每天 $timePart"
+        else -> "每$dayPart $timePart"
+    }
 }
 
 private fun fullRule(task: MobileScheduledTask): String = when (task.kind) {
@@ -454,9 +494,19 @@ private fun fullRule(task: MobileScheduledTask): String = when (task.kind) {
         "每周${days.mapNotNull { dayNames.getOrNull(it - 1) }.joinToString("、周")} · ${task.raw["time"]?.stringValue.orEmpty()} · ${task.raw["timeZone"]?.stringValue.orEmpty()}"
     }
     "every" -> "每 ${duration(task.raw["everySeconds"]?.doubleValue?.toInt() ?: 0)}执行一次"
-    "cron" -> "${task.raw["expression"]?.stringValue.orEmpty()} · ${task.raw["timeZone"]?.stringValue.orEmpty()}"
-    "after" -> "${task.raw["afterSeconds"]?.doubleValue?.toInt() ?: 0} 秒后执行一次"
-    else -> "指定时间执行一次"
+    "cron" -> {
+        val expression = task.raw["expression"]?.stringValue.orEmpty()
+        // 有释义就用人话，并保留原文做副信息；解析不了才只显示原文。
+        val description = cronDescription(expression)
+        if (description == null) {
+            "$expression · ${task.raw["timeZone"]?.stringValue.orEmpty()}"
+        } else {
+            "$description · ${task.raw["timeZone"]?.stringValue.orEmpty()}"
+        }
+    }
+    "after" -> "${duration(task.raw["afterSeconds"]?.doubleValue?.toInt() ?: 0)}后执行一次"
+    "at" -> "指定时间执行一次"
+    else -> task.kind
 }
 
 private fun duration(seconds: Int): String = when {

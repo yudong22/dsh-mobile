@@ -460,7 +460,7 @@ private fun AgentPresetCard(
     busy: Boolean,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = DshCardCornerRadius
     val palette = dshPalette()
     val enabled = !selected && !busy && preset.broken != true
     Column(
@@ -520,7 +520,7 @@ private fun DefaultModelCard(
     onSelectModel: () -> Unit,
     onSelectEffort: (GatewayReasoningEffort) -> Unit
 ) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = DshCardCornerRadius
     val palette = dshPalette()
     Column(
         modifier = Modifier.fillMaxWidth()
@@ -629,7 +629,7 @@ private fun SettingsSection(
     footer: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val cardShape = RoundedCornerShape(22.dp)
+    val cardShape = DshCardCornerRadius
     val palette = dshPalette()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
