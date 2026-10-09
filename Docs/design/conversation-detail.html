@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-font-smoothing:antialiased; }
+  body { font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;
+         background:#E8EAEF; display:flex; gap:34px; padding:30px; align-items:flex-start; }
+
+  .phone { width:390px; height:844px; background:#F8F8F8; border-radius:44px;
+           border:10px solid #1B1D22; overflow:hidden; position:relative; flex:none;
+           box-shadow:0 24px 60px rgba(20,30,60,.18); }
+  .statusbar { height:44px; display:flex; justify-content:space-between; align-items:center;
+               padding:0 24px 0 28px; font-size:14px; font-weight:600; color:#111; }
+  .statusbar .right { display:flex; gap:5px; align-items:center; }
+
+  /* ── 页头 56dp：左 40dp 圆钮 · 中标题+副标题 · 右动作区 40dp── */
+  .header { height:56px; display:flex; align-items:center; padding:0 12px; gap:0; }
+  .circle-btn { width:40px; height:40px; border-radius:50%; background:#FFF;
+                box-shadow:0 1px 3px rgba(20,30,60,.10);
+                display:flex; align-items:center; justify-content:center;
+                color:#1F1F1F; font-size:18px; flex:none; }
+  .hdr-title-block { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .hdr-title { font-size:18px; font-weight:600; color:#1F1F1F; line-height:22px;
+               max-width:230px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .hdr-sub { height:16px; display:flex; align-items:center; gap:5px;
+             font-size:12px; color:#9A9A9A; line-height:16px; }
+  .hdr-sub .sub-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:250px; }
+  /* 状态点与列表页同源：绿=运行 · 琥珀=待处理 · 灰=空闲 */
+  .dot { width:6px; height:6px; border-radius:50%; flex:none; }
+  .dot.run { background:#2EB85C; }
+  .dot.idle { background:#9A9A9A; }
+  .dot.attn { background:#FFAD1F; }
+  /* 左右槽位**等宽**（两个 40dp 钮 + 8dp 间距 = 88dp）：标题才是整屏居中而不是
+     在剩余空间里居中。左侧放 返回+抽屉，右侧只放「更多」并贴右缘。 */
+  .side-slot { width:88px; display:flex; align-items:center; gap:8px; flex:none; }
+  .side-slot.right { justify-content:flex-end; }
+
+  /* ── 正文 ── */
+  .body { padding:0 16px; }
+
+  /* 可折叠状态行（我们叫 StatusRow，参考图为「已完成 ›」） */
+  .status-row { display:flex; align-items:center; gap:8px; padding:10px 0;
+                border-bottom:1px solid #EBEBEB; }
+  .status-row .label { font-size:15px; color:#1F1F1F; }
+  .status-row .chev { color:#9A9A9A; font-size:15px; }
+
+  /* 助手正文 */
+  .para { font-size:15px; line-height:23px; color:#1F1F1F; margin-top:16px; }
+  .para code { background:#F0F0F0; border-radius:4px; padding:1px 5px; font-size:14px; }
+
+  /* 表格块：表头工具条 + 表格 */
+  .tbl-block { margin-top:16px; border:1px solid #EBEBEB; border-radius:12px;
+               overflow:hidden; background:#FFF; }
+  .tbl-bar { display:flex; align-items:center; gap:14px;
+             background:#F2F2F2; padding:9px 14px; }
+  .tbl-bar .name { font-size:14px; color:#3A3F47; flex:1; }
+  .tbl-bar .act { color:#8B8B8B; font-size:15px; }
+  table { width:100%; border-collapse:collapse; }
+  td { font-size:14px; color:#1F1F1F; padding:10px 14px;
+       border-top:1px solid #EBEBEB; border-right:1px solid #EBEBEB; vertical-align:top; }
+  tr td:last-child { border-right:none; }
+  thead td { background:#FAFAFA; color:#3A3F47; }
+
+  /* 消息底部动作行 */
+  /* 回答 tooltip：复制 / 用量 / 时间。默认三级灰，hover 转主色（真机上点按展开） */
+  .msg-actions { display:flex; align-items:center; gap:20px;
+                 padding:14px 0 8px; color:#9A9A9A; font-size:16px; }
+  .msg-actions .ma { cursor:pointer; }
+  .msg-actions .ma-val { font-size:12px; color:#B0B4BC; margin-left:2px; }
+
+  /* ── 底部输入区（现有实现，仅示意） ── */
+  /* 输入框：与现有实现一致 —— 白底 Surface、0.8dp 描边、内边距 h16/top14/bottom12、
+     占位 15sp 三级灰；底行 左[图片] · 中[权限/思考档] · 右[用量环 + 42dp 主色发送] */
+  .composer { position:absolute; left:14px; right:14px; bottom:10px;
+              background:#FFF; border:0.8px solid #EAEAEA; border-radius:20px;
+              padding:14px 16px 12px; box-shadow:0 3px 14px rgba(20,30,60,.06); }
+  .c-input { font-size:15px; color:#9A9A9A; line-height:20px; padding:0 3px 10px; }
+  .c-row { display:flex; align-items:center; gap:8px; }
+  .c-ic { width:32px; height:32px; display:flex; align-items:center; justify-content:center;
+          color:#1F1F1F; font-size:18px; }
+  .c-pill { font-size:13px; color:#1F1F1F; background:#F0F0F0; border-radius:11px;
+            padding:4px 9px; }
+  .c-ring { width:22px; height:22px; border-radius:50%; margin-left:auto;
+            border:2.5px solid #D8DEEA; border-top-color:#2E6BE6; }
+  .c-send { width:42px; height:42px; border-radius:50%; background:#2E6BE6; color:#FFF;
+            display:flex; align-items:center; justify-content:center; font-size:20px;
+            margin-left:6px; }
+
+  /* ── 说明面板 ── */
+  .panel { background:#FFF; border-radius:18px; padding:20px 22px; width:430px; }
+  .panel h3 { font-size:16px; color:#1F1F1F; margin-bottom:14px; }
+  .kv { display:flex; gap:10px; font-size:13px; color:#3A3F47; line-height:21px; margin-bottom:7px; }
+  .kv .k { color:#8A8F98; width:96px; flex:none; }
+  .tag { display:inline-block; font-size:11px; padding:1px 6px; border-radius:6px;
+         background:#EDF1FE; color:#2E6BE6; margin-left:4px; }
+  .tag.new { background:#E8F4EE; color:#1F8A5A; }
+  .sec { font-size:13px; color:#2E6BE6; font-weight:600; margin:16px 0 8px; }
+</style>
+</head>
+<body>
+
+<!-- ================= 任务详情页（现有实现） ================= -->
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span class="right">▮▮ ⌾ ▮</span></div>
+
+  <div class="header">
+    <div class="side-slot">
+      <div class="circle-btn">‹</div>
+      <div class="circle-btn">≡</div>
+    </div>
+    <div class="hdr-title-block">
+      <div class="hdr-title">运行 Ls 命令列出…</div>
+      <div class="hdr-sub"><span class="dot run"></span><span class="sub-text">3 个后台任务 · 1 运行中</span></div>
+    </div>
+    <div class="side-slot right">
+      <div class="circle-btn">⋯</div>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="status-row">
+      <span class="label">已完成</span><span class="chev">›</span>
+    </div>
+
+    <div class="para">
+      <code>/workspace</code> 目录目前是空的，只有系统自动生成的
+      <code>.codebuddy</code> 目录（项目数据，请勿删除）。
+    </div>
+
+    <div class="tbl-block">
+      <div class="tbl-bar">
+        <span class="name">表格</span>
+        <span class="act">⧉</span><span class="act">▤</span>
+        <span class="act">⤢</span><span class="act">↪</span>
+      </div>
+      <table>
+        <thead><tr><td>项目</td><td>说明</td></tr></thead>
+        <tbody>
+          <tr><td>/workspace</td><td>工作目录，当前无用户文件</td></tr>
+          <tr><td>.codebuddy/</td><td>项目相关数据目录（只读，勿删）</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="para">
+      如果你想查看其他位置的文件，或需要我创建/处理某些文件，告诉我即可。
+    </div>
+
+    <div class="msg-actions">
+      <span class="ma" title="复制">⧉</span>
+      <span class="ma" title="用量">◔</span>
+      <span class="ma" title="时间">◷</span>
+      <span class="ma-val">11 秒 · 1.2k tokens</span>
+    </div>
+  </div>
+
+  <div class="composer">
+    <div class="c-input">描述你想要构建的内容</div>
+    <div class="c-row">
+      <span class="c-ic">▤</span>
+      <span class="c-pill">℗ 标准模式</span>
+      <span class="c-pill">High</span>
+      <span class="c-ring"></span>
+      <span class="c-send">↑</span>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 说明 ================= -->
+<div class="panel">
+  <h3>任务详情页 · UI 稿</h3>
+
+  <div class="sec">页头（56dp，四页统一几何）</div>
+  <div class="kv"><span class="k">左 · 返回</span><span>40dp 圆钮，回到任务列表（= 首页）<span class="tag">现有</span></span></div>
+  <div class="kv"><span class="k">左 · 抽屉</span><span>返回钮<b>右侧</b>再放一个 40dp 圆钮，展开侧边抽屉（任务切换 / 设备切换）<span class="tag new">新增</span></span></div>
+  <div class="kv"><span class="k">中 · 标题</span><span>任务名，18sp 半粗，单行截断，整屏居中<span class="tag">现有</span></span></div>
+  <div class="kv"><span class="k">副标题</span><span>后台任务数与运行状态：<b>「3 个后台任务 · 1 运行中」</b>，12sp 次级灰，前置 6dp 状态点（绿=有任务在跑 / 琥珀=有待处理 / 灰=全部空闲）。任务取自 <code>taskSnapshot</code>，状态沿用既有取值 <code>in_progress</code> / <code>completed</code> / 其他=待处理<span class="tag new">新增</span></span></div>
+  <div class="kv"><span class="k">右 · 动作</span><span>40dp 圆钮；与左侧槽位<b>等宽</b>（各 88dp）且贴右缘，标题保持整屏居中<span class="tag">现有</span></span></div>
+
+  <div class="sec">正文</div>
+  <div class="kv"><span class="k">状态行</span><span>「已完成 ›」可折叠，展开看耗时/工具调用<span class="tag">现有·拟改可折叠</span></span></div>
+  <div class="kv"><span class="k">段落</span><span>15sp / 行高 23sp，行内代码浅灰底圆角<span class="tag">现有</span></span></div>
+  <div class="kv"><span class="k">表格</span><span>表头工具条（复制 / 转图片 / 展开 / 分享）+ 斑马表头<span class="tag new">新增</span></span></div>
+  <div class="kv"><span class="k">回答 tooltip</span><span>仅三项：<b>复制 · 用量 · 时间</b>，右侧跟一条 12sp 弱化数值（如「11 秒 · 1.2k tokens」）。默认三级灰，点按展开明细<span class="tag new">新增</span></span></div>
+  <div class="kv"><span class="k">输入区</span><span><b>与现有实现一致</b>：白 Surface + 0.8dp 描边、内边距 h16/top14/bottom12、占位 15sp 三级灰；底行 [图片] · [权限胶囊][思考档] · [用量环][42dp 主色发送]<span class="tag">现有</span></span></div>
+
+  <div class="sec">数据来源（据代码核对）</div>
+  <div class="kv"><span class="k">时间</span><span>ConversationItem.epochSeconds（每条都有）</span></div>
+  <div class="kv"><span class="k">用量</span><span>会话级 contextSnapshot.pressureTokens / contextWindow（ContextUsageRing 同源）。<b>单条回答的 token 数投影里没有</b>，若要逐条显示需先扩协议</span></div>
+  <div class="kv"><span class="k">耗时</span><span>ConversationDisplayGroups.durationSeconds（分组首尾时间差）</span></div>
+
+  <div class="sec">尺寸与配色（沿用全局 token）</div>
+  <div class="kv"><span class="k">正文/辅助</span><span>15sp / 12–13sp，与列表页同一层级</span></div>
+  <div class="kv"><span class="k">配色</span><span>画布 #F8F8F8 · 卡片 #FFF · 描边 #EBEBEB · 主色 #2E6BE6</span></div>
+  <div class="kv"><span class="k">圆角</span><span>卡片 12–20dp · 圆钮全圆 · 输入框 20dp</span></div>
+</div>
+
+</body>
+</html>

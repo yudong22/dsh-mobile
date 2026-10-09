@@ -163,8 +163,7 @@ Android 和 iOS 均在平台侧负责安全存储、图片处理、临时文件�
 ├── androidApp/                     # Android 原生应用（Jetpack Compose）
 │   └── src/
 │       ├── main/                   # 产品代码与平台实现
-│       ├── test/                   # JVM 测试
-│       └── androidTest/            # 设备测试
+│       └── test/                   # JVM 单元测试（含 UI 逻辑的纯函数守卫）
 ├── DeepSeekHarnessMobile/          # iOS 原生应用（SwiftUI/UIKit）
 ├── DeepSeekHarnessMobileTests/     # iOS XCTest
 ├── DeepSeekHarnessMobile.xcodeproj
@@ -270,11 +269,13 @@ adb reverse tcp:3080 tcp:3080
   :androidApp:assembleDebug
 ```
 
-有可用 Android 设备或模拟器时，可继续执行：
+UI 逻辑（滚动数学、页头槽位、字号与文案、投影分组等）都以**纯函数**形式放在
+`androidApp/src/test/`，因此上面这条命令就能覆盖，不需要设备。
 
-```bash
-./gradlew :androidApp:connectedDebugAndroidTest
-```
+> 设备测试（`androidTest/`）已移除：它们要连真实设备、单次全量约 12 分钟，
+> 且实测耗时受宿主机负载影响可达 9 倍波动。原有用例的**关键不变量**已改写为
+> JVM 单测（例如页头重叠缺陷 → `DshPageHeaderSlotWidthTest`）；
+> 其余用例仍在 git 历史中，需要时可恢复。
 
 iOS 测试可在 Xcode 中选择 `DeepSeekHarnessMobile` Scheme 后执行 **Product → Test**。构建阶段会自动链接对应架构的 `DeepSeekHarnessShared.framework`。
 

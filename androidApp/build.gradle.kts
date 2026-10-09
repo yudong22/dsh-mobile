@@ -48,15 +48,13 @@ android {
         applicationId = "com.clarklevis.dsh.android"
         minSdk = 24
         targetSdk = 36
-        versionCode = 25
-        versionName = "1.9.6"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 26
+        versionName = "1.9.7"
     }
 
     testOptions {
-        // 关掉系统动画：设备测试此前在有动画的模拟器上要多等每个 Compose 断言同步。
-        // 这是 AGP 的官方开关（等价于逐个 adb settings put global *_animation_scale 0），
-        // 只作用于连测的设备，不影响 App 运行时的动画表现。
+        // 关掉系统动画：仅在跑设备测试时有意义（历史上如此设置）。设备测试已移除，
+        // 这个开关对 JVM 单测无副作用，保留不影响 `testDebugUnitTest`。
         animationsDisabled = true
     }
 
@@ -145,12 +143,6 @@ dependencies {
     implementation(libs.firebase.messaging)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
-    androidTestImplementation(libs.androidx.test.ext.junit)
-    androidTestImplementation(libs.androidx.test.runner)
-    androidTestImplementation(libs.androidx.test.rules)
-    androidTestImplementation(composeBom)
-    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 }
