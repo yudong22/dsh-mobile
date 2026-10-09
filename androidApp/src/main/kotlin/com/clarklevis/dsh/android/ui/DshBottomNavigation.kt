@@ -18,10 +18,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clarklevis.dsh.android.R
@@ -47,14 +50,15 @@ import com.clarklevis.dsh.shared.gateway.GatewayConnectionState
 /**
  * 底部主导航的条目。
  *
- * 左三项是页面目的地（任务列表 / 项目 / 定时任务），右两项是全局动作（设置 / 扫码）——
- * 设置与扫码原先在首页顶栏，为腾出顶部空间并统一到拇指可达区域而下移。
- * 「专家」与「资料库」已移除：前者改由设置页的 Agent 预设入口承担，后者不再提供。
+ * 三个页面目的地（任务列表 / 项目 / 定时任务）+ 一个账户页（我的）。
+ * 「我的」而不是「设置」：该页是「账户 + 个人偏好」，页面标题与应用内各处文案
+ * 早已统一为「我的」，底栏沿用旧名会让同一目的地出现两种叫法。
+ * 「扫码」原先占第五格，本轮 UI 统一后移到任务/项目页右上角的认证菜单按钮
+ * （[DshScanMenuButton]）——配对是设备级操作，放在设备上下文所在的页面更顺。
+ * 「专家」与「资料库」已移除：前者改由「我的」页的 Agent 预设入口承担，后者不再提供。
  *
  * 「任务列表」而不是「任务」：该 Tab 的落点是任务列表页，用「任务列表」能区别于抽屉里
  * 同名的「任务 (n)」区块标题。`label` 同时是读屏用的 contentDescription。
- *
- * 视觉比例对齐改版截图：整条 84dp 高、图标 26dp、标签 11sp、选中态用主文字色、未选中用三级文字色。
  */
 internal enum class DshTab(
     val label: String,
@@ -64,8 +68,7 @@ internal enum class DshTab(
     TASKS("任务列表", R.drawable.ic_tab_tasks, "tab-tasks"),
     PROJECTS("项目", R.drawable.ic_tab_projects, "tab-projects"),
     SCHEDULES("定时任务", R.drawable.ic_drawer_schedule, "tab-schedules"),
-    SETTINGS("设置", R.drawable.ic_settings, "tab-settings"),
-    SCAN("扫码", R.drawable.ic_gateway_auth, "tab-scan")
+    SETTINGS("我的", R.drawable.ic_settings, "tab-settings")
 }
 
 /**
@@ -189,30 +192,51 @@ internal fun DshDrawerButton(
 }
 
 /**
- * 底栏 + 「扫码」认证菜单的组合外壳。
+ * 底栏 + 页面级切换的组合外壳（扫码移除后仅剩导航职责）。
  *
- * 「扫码」不是页面目的地而是全局动作（在原位展开菜单），所以它与底栏强绑定：
- * 哪个页面挂了底栏，哪里就必须能开这个菜单，否则表现为「点了没反应」。
- * 把它封装在这里，各页面只需把本组件放进 `Scaffold(bottomBar = ...)`，
- * 不必各自重复一遍菜单与锚点逻辑。
+ * 底栏是 NavHost 的兄弟节点：页面切换时它保持不动（符合「常驻导航」的预期）。
  */
 @Composable
 internal fun DshBottomBarHost(
     selected: DshTab,
-    onSelectTab: (DshTab) -> Unit,
+    onSelectTab: (DshTab) -> Unit
+) {
+    DshBottomTabBar(
+        selected = selected,
+        onSelect = onSelectTab
+    )
+}
+
+/**
+ * 任务/项目页右上角的「配对设备」入口（扫码 Tab 移除后的落点）。
+ *
+ * 40dp 圆钮（[DshPageHeaderCircleButtonSize] token）+ 点击弹出认证菜单
+ * （扫描二维码 / 手动输入配对信息）。菜单锚点在按钮下方右侧。
+ * 放在设备上下文所在的页面（任务/项目）而不是底栏：配对是设备级操作。
+ */
+internal data class ScanActions(
+    val onScanRequested: () -> Unit,
+    val onManualEntryRequested: () -> Unit
+)
+
+/** 外壳提供的配对动作；未提供的页面（我的/定时任务等）读取为 null，不渲染入口。 */
+internal val LocalScanActions = staticCompositionLocalOf<ScanActions?> { null }
+
+@Composable
+internal fun DshScanMenuButton(
     onScanRequested: () -> Unit,
-    onManualEntryRequested: () -> Unit
+    onManualEntryRequested: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     // 菜单展开态是纯 UI 状态，随屏幕重建保留即可。
     var showAuthMenu by rememberSaveable { mutableStateOf(false) }
-    Box {
-        DshBottomTabBar(
-            selected = selected,
-            onSelect = { tab ->
-                if (tab == DshTab.SCAN) showAuthMenu = true else onSelectTab(tab)
-            }
+    val palette = dshPalette()
+    Box(modifier) {
+        TopBarCircleButton(
+            iconRes = R.drawable.ic_gateway_auth,
+            description = "配对设备",
+            onClick = { showAuthMenu = true }
         )
-        // 菜单锚在底栏左上角区域；向上弹以免超出屏幕底部。
         GatewayAuthenticationMenuContent(
             expanded = showAuthMenu,
             onDismissRequest = { showAuthMenu = false },
@@ -223,7 +247,8 @@ internal fun DshBottomBarHost(
             onManualEntry = {
                 showAuthMenu = false
                 onManualEntryRequested()
-            }
+            },
+            offset = DpOffset(x = (-12).dp, y = 8.dp)
         )
     }
 }

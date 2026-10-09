@@ -37,6 +37,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -44,6 +45,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,6 +75,67 @@ import kotlin.math.abs
 import kotlinx.coroutines.launch
 
 private val drawerPageShape = RoundedCornerShape(48.dp)
+
+/**
+ * 抽屉的全部入参与回调，打包成一个对象。
+ *
+ * 抽屉自 v1.9.0 挂在应用外壳、本轮又收敛到任务详情页——无论挂在哪层，
+ * 数据都由外壳（DshProductApp）准备，组件本体只消费；打包传参避免
+ * 详情页签名里堆十几个回调。
+ */
+internal data class WorkspaceDrawerCallbacks(
+    val sessions: List<SessionSummary>,
+    val gatewayLabel: String,
+    val connection: GatewayConnectionState,
+    val deviceIsServer: Boolean,
+    val devices: List<DrawerDeviceOption>,
+    val onSelectDevice: (String) -> Unit,
+    val onPairNewDevice: () -> Unit,
+    val accountName: String,
+    val accountPlan: String,
+    val accountQuota: String?,
+    val onOpenSession: (String) -> Unit,
+    val onNewSession: () -> Unit,
+    val onRenameSession: (String, String) -> Unit,
+    val onArchiveSession: (String) -> Unit,
+    val onPlugins: () -> Unit
+)
+
+/**
+ * 任务详情页专用的抽屉宿主：包裹详情页内容，并把「打开抽屉」的回调
+ * 通过 [LocalDrawerOpener] 提供给任意深度的内容（详情页页头用它把左侧
+ * 返回钮换成抽屉钮）。
+ */
+@Composable
+internal fun WorkspaceDrawerHost(
+    callbacks: WorkspaceDrawerCallbacks,
+    content: @Composable () -> Unit
+) {
+    WorkspaceDrawer(
+        sessions = callbacks.sessions,
+        gatewayLabel = callbacks.gatewayLabel,
+        connection = callbacks.connection,
+        deviceIsServer = callbacks.deviceIsServer,
+        devices = callbacks.devices,
+        onSelectDevice = callbacks.onSelectDevice,
+        onPairNewDevice = callbacks.onPairNewDevice,
+        accountName = callbacks.accountName,
+        accountPlan = callbacks.accountPlan,
+        accountQuota = callbacks.accountQuota,
+        onOpenSession = callbacks.onOpenSession,
+        onNewSession = callbacks.onNewSession,
+        onRenameSession = callbacks.onRenameSession,
+        onArchiveSession = callbacks.onArchiveSession,
+        onPlugins = callbacks.onPlugins
+    ) { openDrawer, _ ->
+        CompositionLocalProvider(LocalDrawerOpener provides openDrawer) {
+            content()
+        }
+    }
+}
+
+/** 详情页页头读取该值决定左侧是否渲染抽屉按钮。抽屉宿主以外默认为 null（渲染返回钮）。 */
+internal val LocalDrawerOpener = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 /**
  * 侧边抽屉，按参考截图优化后的结构：

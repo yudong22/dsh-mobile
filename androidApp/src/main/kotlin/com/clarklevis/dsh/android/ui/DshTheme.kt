@@ -70,9 +70,13 @@ internal val DshPageTitleFontSize = 18.sp
  * 此前三种页头各写各的：首页品牌头无固定高度、左侧 47dp 汉堡、标题 17–20sp 自适应；
  * 二级页 56dp + 46dp 返回钮 + 18sp。切页面时页头会整体跳动。
  * 这里把「页头内容高度」「左侧圆钮直径」「水平内边距」收敛成一组 token。
+ *
+ * 圆钮 40dp 而不是 46dp：页头内容高 56dp，40dp 的按钮上下各留 8dp 呼吸空间；
+ * 46dp 只剩 5dp，视觉上「顶满」页头（真机截图对比确认过）。左侧返回钮、右侧
+ * 「更多」/抽屉钮都用同一 token——此前返回 46dp、抽屉 40dp 并排出现时大小不一。
  */
 internal val DshPageHeaderHeight = 56.dp
-internal val DshPageHeaderCircleButtonSize = 46.dp
+internal val DshPageHeaderCircleButtonSize = 40.dp
 internal val DshPageHeaderHorizontalPadding = 12.dp
 
 /**
@@ -97,6 +101,31 @@ internal val DshHeaderSubtitleFontSize = 12.sp
 internal val DshHeaderSubtitleSlotHeight = 16.dp
 internal val DshBodyFontSize = 15.sp
 internal val DshCaptionFontSize = 13.sp
+
+/**
+ * 「我的」页与子设置页的行几何（对照参考图 1/2）：
+ * 行最小高 64dp、标题 17sp、右侧值 15sp 灰、chevron 16dp。
+ * 此前设置行 54dp/16sp、值 14sp，与参考图的宽松行距不符；
+ * 抽出来统一管理，避免每个设置页各写各的。
+ */
+internal val DshSettingsRowMinHeight = 64.dp
+internal val DshSettingsTitleFontSize = 17.sp
+internal val DshSettingsValueFontSize = 15.sp
+internal val DshSettingsChevronSize = 16.dp
+
+/**
+ * 悬浮新建按钮（参考图 3 右下角 FAB）：56dp 圆 + 24dp 图标。
+ * 颜色取 palette.primary（随主题），不写死绿色。
+ *
+ * 右侧与底部**分开**取值：底栏常驻时 FAB 悬在底栏之上，两者共用 20dp 会让
+ * 视觉下边距偏大（底栏 68dp + 20dp）。底部单独收到 12dp，贴近底栏又不压住它。
+ */
+internal val DshFabSize = 56.dp
+internal val DshFabIconSize = 24.dp
+internal val DshFabEdgePadding = 20.dp
+
+/** FAB 距底部的间距：比右侧更小，避免与底栏叠加后视觉留白过大。 */
+internal val DshFabBottomPadding = 12.dp
 
 /**
  * 品牌色与固定语义色。
@@ -139,6 +168,30 @@ internal object DshColors {
     val TextTertiaryLight = Color(0xFF9A9A9A)
     val AccentLight = Color(0xFF1FA07E)
 
+    /**
+     * 选中行的底色（浅色）。
+     *
+     * **中性冷灰、不带蓝**（用户明确要求）：选中态的主信号是行首 3dp 强调条与
+     * 行尾勾，底色只做「这一行被选中」的轻微区分。此前用主色系浅蓝 `#E8EFFE`，
+     * 在卡片上像一个色块跳出来，喧宾夺主。
+     *
+     * 取**实色**而非 `primary.copy(alpha)`：透明叠加结果随底层背景漂移
+     * （叠在 `#F8F8F8` 上会发灰紫）。与白卡片 1.12:1、正文 14.7:1——可辨但不抢眼。
+     */
+    val SelectedRowLight = Color(0xFFF0F2F5)
+    val SelectedRowDark = Color(0xFF262B33)
+
+    /**
+     * 悬浮主行动按钮的**禁用**底色（浅色）。
+     *
+     * 不用「主色降透明度」：`alpha 0.38` 叠在画布上得到 `#ACC3F1`，
+     * 明度被画布抬高的同时色相也发灰——「变淡」与「变脏」分不开。
+     * 这里给一个**预先调好的浅蓝**：明确表达「这是可点按钮，但现在点不了」，
+     * 而不是看起来像坏掉的控件。深色同理，给暗蓝而不是降透明度。
+     */
+    val DisabledPrimaryLight = Color(0xFFBBD1FB)
+    val DisabledPrimaryDark = Color(0xFF2E4270)
+
     val CanvasDark = Color(0xFF0E0E10)
     val DrawerDark = Color(0xFF151517)
     val SurfaceDark = Color(0xFF1C1C1E)
@@ -174,8 +227,18 @@ internal data class DshPalette(
     val textTertiary: Color,
     /** 品牌强调色：账户头像、成功态点睛。 */
     val accent: Color,
-    /** 主操作色：发送键、选中态。 */
-    val primary: Color
+    /** 主操作色：发送键、可点的 FAB。 */
+    val primary: Color,
+    /**
+     * 分组列表**选中行**的底色（中性冷灰，不带蓝）。
+     * 取实色而不是 `primary.copy(alpha)`——透明叠加随底层背景漂移。
+     */
+    val selectedRow: Color,
+    /**
+     * 主行动按钮的**禁用**底色，见 [DshColors.DisabledPrimaryLight]。
+     * 与 [primary] 成对使用：可点取 primary、不可点取本值。
+     */
+    val disabledPrimary: Color
 ) {
     /** 覆盖在 canvas 上的浮层阴影，浅色下更淡。 */
     val floatingShadow: Color get() = Color.Black.copy(alpha = if (isDark) 0.42f else 0.08f)
@@ -206,7 +269,9 @@ internal object DshPalettes {
         textSecondary = DshColors.TextSecondaryLight,
         textTertiary = DshColors.TextTertiaryLight,
         accent = DshColors.AccentLight,
-        primary = DshColors.Ocean
+        primary = DshColors.Ocean,
+        selectedRow = DshColors.SelectedRowLight,
+        disabledPrimary = DshColors.DisabledPrimaryLight
     )
 
     val Dark = DshPalette(
@@ -221,7 +286,9 @@ internal object DshPalettes {
         textSecondary = DshColors.TextSecondaryDark,
         textTertiary = DshColors.TextTertiaryDark,
         accent = DshColors.AccentDark,
-        primary = Color(0xFF7EA8FF)
+        primary = Color(0xFF7EA8FF),
+        selectedRow = DshColors.SelectedRowDark,
+        disabledPrimary = DshColors.DisabledPrimaryDark
     )
 }
 

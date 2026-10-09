@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -27,10 +26,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
@@ -55,7 +51,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -66,10 +61,8 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.graphics.shadow.Shadow
 import com.clarklevis.dsh.android.AndroidSharedStateHolder
 import com.clarklevis.dsh.android.MobileScheduledTask
 import com.clarklevis.dsh.android.R
@@ -83,8 +76,8 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun ScheduledTasksScreen(
     stateHolder: AndroidSharedStateHolder,
-    onBack: () -> Unit,
-    onOpenSession: (String) -> Unit
+    onOpenSession: (String) -> Unit,
+    onNewTask: () -> Unit = {}
 ) {
     val palette = dshPalette()
     var editingTask by remember { mutableStateOf<MobileScheduledTask?>(null) }
@@ -104,28 +97,29 @@ internal fun ScheduledTasksScreen(
     LaunchedEffect(connection) {
         if (connection == GatewayConnectionState.CONNECTED) stateHolder.refreshScheduledTasks()
     }
-    Column(
-        Modifier.fillMaxSize()
+    // 统一走 DshTabScaffold：页头（设备副标题 + 相位标签 + 配对入口）+ 正文 + FAB。
+    // FAB 的新建动作：宿主网关**没有**「新建定时任务」的协议（只有 list/catalog/
+    // update/delete，Web 端的「新建」同样是引导开新会话，见宿主
+    // ui-schedule/src/client/index.ts 的 onNewTask），因此跳到首页并新建任务
+    // ——定时任务由 Agent 在会话里创建。
+    DshTabScaffold(
+        title = "定时任务",
+        subtitle = stateHolder.activeGatewayDisplayName(),
+        connection = connection,
+        headerStatus = DshHeaderStatus(
+            text = homeConnectionBadge(connection),
+            highlighted = connection == GatewayConnectionState.CONNECTED
+        ),
+        modifier = Modifier
             .background(palette.canvas)
             .navigationBarsPadding()
-            .testTag("scheduled-tasks-screen")
+            .testTag("scheduled-tasks-screen"),
+        fab = DshFabSpec(
+            onClick = onNewTask,
+            contentDescription = "新建任务",
+            testTag = "scheduled-tasks-fab"
+        )
     ) {
-        // 统一走 DshPageHeader：此前这里手写 Row，标题 20sp 居中，与项目页（18sp 左对齐）
-        // 和设置页（17sp 居中）三套并存。
-        DshPageHeader(title = "定时任务", onBack = onBack) {
-            // 右侧放连接相位标签：断网时列表是断网前的缓存（stale），
-            // 没有任何标识会让用户以为看到的是最新状态。
-            Text(
-                text = homeConnectionBadge(connection),
-                color = if (connection == GatewayConnectionState.CONNECTED) {
-                    DshColors.Success
-                } else {
-                    palette.textTertiary
-                },
-                fontSize = 13.sp,
-                modifier = Modifier.padding(end = 8.dp).testTag("scheduled-tasks-status")
-            )
-        }
         when {
             stateHolder.scheduledTasksLoading && stateHolder.scheduledTasks.isEmpty() -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -149,37 +143,48 @@ internal fun ScheduledTasksScreen(
             }
             else -> LazyColumn(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 20.dp, end = 20.dp, top = 18.dp, bottom = 28.dp
+                    start = 18.dp, end = 18.dp, top = 10.dp, bottom = DshFabReservedHeight
                 ),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                items(stateHolder.scheduledTasks, key = { it.id }) { task ->
-                    ScheduledTaskCard(
-                        task = task,
-                        // 建一次索引再查表：原先在 items lambda 里对每个 task 线性扫描
-                        // snapshot.sessions（O(tasks × sessions)），而 snapshot 每次 token 流
-                        // 都会重发布，列表滚动时会被反复放大。
-                        sessionTitle = sessionTitles[task.sessionId] ?: task.sessionId,
-                        revealedTaskId = revealedTaskId,
-                        onRevealChange = { revealedTaskId = it },
-                        onOpenSession = {
-                            if (revealedTaskId == task.id) revealedTaskId = null
-                            else {
-                                revealedTaskId = null
-                                onOpenSession(task.sessionId)
-                            }
-                        },
-                        onEdit = {
-                            revealedTaskId = null
-                            editingTask = task
-                        },
-                        canMutate = canMutate,
-                        onDelete = {
-                            revealedTaskId = null
-                            deletingTask = task
-                        },
-                        busy = stateHolder.scheduledTaskPendingId == task.id
-                    )
+                // 公共「分组圆角列表」容器（与项目页/首页同一套，DshGroupedList.kt）：
+                // 定时任务整组共享一个圆角 surface，滑动交互与展开详情保留在行内。
+                item(key = "scheduled-tasks-group") {
+                    DshGroupedSection(
+                        label = "任务",
+                        showCount = true,
+                        count = stateHolder.scheduledTasks.size
+                    ) {
+                        stateHolder.scheduledTasks.forEachIndexed { index, task ->
+                            if (index > 0) DshGroupedRowDivider(startIndent = 20.dp)
+                            ScheduledTaskCard(
+                                task = task,
+                                // 建一次索引再查表：原先在 items lambda 里对每个 task 线性扫描
+                                // snapshot.sessions（O(tasks × sessions)），而 snapshot 每次 token 流
+                                // 都会重发布，列表滚动时会被反复放大。
+                                sessionTitle = sessionTitles[task.sessionId] ?: task.sessionId,
+                                revealedTaskId = revealedTaskId,
+                                onRevealChange = { revealedTaskId = it },
+                                onOpenSession = {
+                                    if (revealedTaskId == task.id) revealedTaskId = null
+                                    else {
+                                        revealedTaskId = null
+                                        onOpenSession(task.sessionId)
+                                    }
+                                },
+                                onEdit = {
+                                    revealedTaskId = null
+                                    editingTask = task
+                                },
+                                canMutate = canMutate,
+                                onDelete = {
+                                    revealedTaskId = null
+                                    deletingTask = task
+                                },
+                                busy = stateHolder.scheduledTaskPendingId == task.id
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -324,16 +329,8 @@ private fun ScheduledTaskCard(
         Column(
             Modifier.fillMaxWidth()
                 .offset { IntOffset(offsetPx.roundToInt(), 0) }
-                .dropShadow(
-                    shape = DshCardCornerRadius,
-                    shadow = Shadow(
-                        radius = 14.dp,
-                        color = palette.floatingShadow,
-                        offset = DpOffset(0.dp, 4.dp)
-                    )
-                )
-                .background(palette.surface, DshCardCornerRadius)
-                .border(1.dp, palette.cardBorder, DshCardCornerRadius)
+                // 行已处于分组容器的 surface 上（DshGroupedSection），不再自带卡片底/描边/阴影：
+                // 旧样式每行一张带阴影的独立大卡，新样式行是容器内的一个分段。
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = rememberDraggableState { delta ->

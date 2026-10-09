@@ -7,7 +7,6 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,12 +14,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -32,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -58,7 +58,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -120,10 +119,10 @@ internal fun DshProductApp(
         }
     }
 
-    // ---- 抽屉与底栏提升到应用外壳（v1.9.0 点 5 + 点 6）----
-    // 此前抽屉只包住首页正文，因此会话页拿不到它；底栏也只有首页有。
-    // 现在两者都挂在 NavHost 之上，所有核心页面共享同一份抽屉状态与会话投影
-    // （`workspaceScopedSessions` 保持唯一实现，不复制成两份）。
+    // ---- 抽屉已从应用外壳收敛到任务详情页（本轮改动）----
+    // 此前抽屉包住整个 NavHost（v1.9.0 点 5），首页也能唤起；但首页已有完整任务列表，
+    // 抽屉里的会话列表与之重复。现在抽屉只挂在任务详情页内部——那里的任务间切换
+    // 才是它的高频场景。设备下拉、配对、账户卡等状态仍在这里准备，传给详情页。
     val application = LocalContext.current.applicationContext as? DshAndroidApplication
     val hosts = application?.hosts
     val workspaces = stateHolder.availableWorkspaces
@@ -170,7 +169,6 @@ internal fun DshProductApp(
             DshTab.PROJECTS -> ROUTE_PROJECTS
             DshTab.SCHEDULES -> ROUTE_SCHEDULED_TASKS
             DshTab.SETTINGS -> ROUTE_SETTINGS
-            DshTab.SCAN -> return
         }
         if (route == currentRoute) return
         navController.navigate(route) {
@@ -196,7 +194,10 @@ internal fun DshProductApp(
         }
     }
 
-    WorkspaceDrawer(
+    // 抽屉的数据由外壳准备（设备列表、版本号、会话投影），组件本体只挂任务详情页。
+    // openSession 保留「已在会话页只切换选中」的语义：抽屉在详情页内打开，
+    // 连续切换 N 个任务不能压 N 层栈。
+    val drawerCallbacks = WorkspaceDrawerCallbacks(
         sessions = sessions,
         gatewayLabel = stateHolder.activeGatewayDisplayName(),
         connection = stateHolder.gatewayState.connection,
@@ -206,8 +207,6 @@ internal fun DshProductApp(
             hosts?.profiles?.firstOrNull { it.localId == id }?.let { hosts.select(it) }
         },
         onPairNewDevice = { showQrScanner = true },
-        // 账户卡展示产品身份而不是设备名：设备名已在上一行的设备下拉里，
-        // 重复显示会让人误以为「账户名 = 设备名」。
         accountName = "dsh-mobile",
         accountPlan = "标准版",
         accountQuota = appVersionLabel,
@@ -227,147 +226,170 @@ internal fun DshProductApp(
         onRenameSession = stateHolder::renameSession,
         onArchiveSession = stateHolder::archiveSession,
         onPlugins = { navController.navigate(ROUTE_PLUGINS) }
-    ) { openDrawer, canScrollVertically ->
-        val tab = currentTab
-        // 底栏在两种情况下不显示：下钻页（tab == null），或键盘弹出时（见下方注释）。
-        // 只有**确实显示**时才消费导航栏 inset——否则下钻页的列表会把 inset 扣掉，
-        // 内容滑到导航栏底下。
-        val showsBottomBar = tab != null && !WindowInsets.isImeVisible
+    )
+
+    val tab = currentTab
+    // 底栏在两种情况下不显示：下钻页（tab == null），或键盘弹出时（见下方注释）。
+    // 只有**确实显示**时才消费导航栏 inset——否则下钻页的列表会把 inset 扣掉，
+    // 内容滑到导航栏底下。
+    val showsBottomBar = tab != null && !WindowInsets.isImeVisible
+    // 扫码/手动配对入口：底栏 Tab 移除后，挂到任务/项目页右上角的
+    // [DshScanMenuButton]（通过 CompositionLocal 下发，页面无需层层传参）。
+    val scanActions = ScanActions(
+        onScanRequested = {
+            stateHolder.clearPlatformError()
+            showQrScanner = true
+        },
+        onManualEntryRequested = {
+            stateHolder.clearPlatformError()
+            showManualPairing = true
+        }
+    )
+    CompositionLocalProvider(LocalScanActions provides scanActions) {
         Column(Modifier.fillMaxSize()) {
-            NavHost(
-                navController = navController,
-                startDestination = ROUTE_WORKSPACE,
-                // 底栏显示时它已占据底部区域（自身带 navigationBarsPadding），因此在这一层
-                // 把导航栏 inset 消费掉：页内再调 `navigationBarsPadding()` 或 Scaffold 默认
-                // contentWindowInsets 时解析为 0，避免同一条 inset 计两次而多出一条空白
-                // （四个 Tab 目的地都会再取一次）。
-                modifier = Modifier.weight(1f).then(
-                    if (showsBottomBar) {
-                        Modifier.consumeWindowInsets(WindowInsets.navigationBars)
-                    } else {
-                        Modifier
-                    }
-                ),
-                // 底栏切换**一律无横向动画**：四个 Tab 是平级目的地，左右滑动是
-                // 「进入下一层」的语义，用在平级切换上会让人以为进了一层。
-                // 判据是「起止路由都是 Tab 根目的地」——不依赖具体的选中项，
-                // 因此任何两个 Tab 之间互切都是瞬时。
-                // 详情页（下钻）不在 [TAB_ROOT_ROUTES] 内，进出仍保留滑动语义。
-                enterTransition = {
-                    if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
-                        EnterTransition.None
-                    } else {
-                        slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Left, tween(260))
-                    }
-                },
-                exitTransition = {
-                    if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
-                        ExitTransition.None
-                    } else {
-                        slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Left, tween(260))
-                    }
-                },
-                popEnterTransition = {
-                    if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
-                        EnterTransition.None
-                    } else {
-                        slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Right, tween(260))
-                    }
-                },
-                popExitTransition = {
-                    if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
-                        ExitTransition.None
-                    } else {
-                        slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Right, tween(260))
-                    }
+        NavHost(
+            navController = navController,
+            startDestination = ROUTE_WORKSPACE,
+            // 底栏显示时它已占据底部区域（自身带 navigationBarsPadding），因此在这一层
+            // 把导航栏 inset 消费掉：页内再调 `navigationBarsPadding()` 或 Scaffold 默认
+            // contentWindowInsets 时解析为 0，避免同一条 inset 计两次而多出一条空白
+            // （四个 Tab 目的地都会再取一次）。
+            modifier = Modifier.weight(1f).then(
+                if (showsBottomBar) {
+                    Modifier.consumeWindowInsets(WindowInsets.navigationBars)
+                } else {
+                    Modifier
                 }
-            ) {
-                composable(ROUTE_WORKSPACE) {
-                    WorkspaceScreen(
-                        stateHolder = stateHolder,
-                        sessions = sessions,
-                        openDrawer = openDrawer,
-                        canScrollVertically = canScrollVertically,
-                        onOpenSession = { id ->
-                            stateHolder.selectSession(id)
-                            navController.navigate(ROUTE_CONVERSATION)
-                        },
-                        onNewSession = {
-                            // prepareNewSession 是 suspend，必须在协程里调用。
-                            shellScope.launch {
-                                if (stateHolder.prepareNewSession()) {
-                                    navController.navigate(ROUTE_CONVERSATION)
-                                }
-                            }
-                        }
-                    )
+            ),
+            // 底栏切换**一律无横向动画**：四个 Tab 是平级目的地，左右滑动是
+            // 「进入下一层」的语义，用在平级切换上会让人以为进了一层。
+            // 判据是「起止路由都是 Tab 根目的地」——不依赖具体的选中项，
+            // 因此任何两个 Tab 之间互切都是瞬时。
+            // 详情页（下钻）不在 [TAB_ROOT_ROUTES] 内，进出仍保留滑动语义。
+            enterTransition = {
+                if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
+                    EnterTransition.None
+                } else {
+                    slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Left, tween(260))
                 }
-                composable(ROUTE_CONVERSATION) {
-                    ConversationScreen(
-                        stateHolder = stateHolder,
-                        onPickImage = onPickImage,
-                        onBack = navController::popBackStack
-                    )
+            },
+            exitTransition = {
+                if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
+                    ExitTransition.None
+                } else {
+                    slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Left, tween(260))
                 }
-                composable(ROUTE_SETTINGS) {
-                    SettingsScreen(
-                        stateHolder = stateHolder,
-                        onBack = navController::popBackStack,
-                        onOpenAgentPresets = { navController.navigate(ROUTE_SETTINGS_AGENT_PRESETS) },
-                        onOpenDefaultModel = { navController.navigate(ROUTE_SETTINGS_DEFAULT_MODEL) }
-                    )
+            },
+            popEnterTransition = {
+                if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
+                    EnterTransition.None
+                } else {
+                    slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Right, tween(260))
                 }
-                composable(ROUTE_SETTINGS_AGENT_PRESETS) {
-                    AgentPresetSelectionScreen(stateHolder, navController::popBackStack)
-                }
-                composable(ROUTE_SETTINGS_DEFAULT_MODEL) {
-                    DefaultModelSelectionScreen(stateHolder, navController::popBackStack)
-                }
-                composable(ROUTE_PLUGINS) {
-                    DrawerDestinationScreen("插件", "插件功能尚未接入", navController::popBackStack)
-                }
-                composable(ROUTE_SCHEDULED_TASKS) {
-                    ScheduledTasksScreen(
-                        stateHolder = stateHolder,
-                        onBack = navController::popBackStack,
-                        onOpenSession = ::openSession
-                    )
-                }
-                composable(ROUTE_PROJECTS) {
-                    ProjectsTabScreen(
-                        stateHolder = stateHolder,
-                        onBack = navController::popBackStack,
-                        // 选中项目后回到任务列表：项目页恒由首页压栈，故 popBackStack 即回到
-                        // ROUTE_WORKSPACE。这样「点项目」的意图（去看它的任务）才有结果。
-                        onProjectSelected = navController::popBackStack
-                    )
+            },
+            popExitTransition = {
+                if (isTabToTab(initialState.destination.route, targetState.destination.route)) {
+                    ExitTransition.None
+                } else {
+                    slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Right, tween(260))
                 }
             }
-            // 核心页面保留完整切换导航（点 6）。二级下钻页（插件、Agent 预设、
-            // 默认模型）返回 null，不挂底栏——它们是下钻而非目的地。
-            //
-            // 底栏是 NavHost 的**兄弟节点**：页面切换时它保持不动（符合「常驻导航」的
-            // 预期），同时仍在抽屉的「滑动页面」内部，抽屉打开时会随内容一起右移。
-            //
-            // 键盘弹出时隐藏底栏（`showsBottomBar` 的第二个条件）：`adjustResize` 下键盘
-            // 缩小 layoutHeight，会把底栏顶到键盘正上方，与同样 `.imePadding()` 上浮的
-            // 输入框叠加，吃掉约 84dp 输入区。首页从不暴露此问题（它没有输入框）。
-            if (showsBottomBar) {
-                DshBottomBarHost(
-                    selected = requireNotNull(tab),
-                    onSelectTab = ::navigateToTab,
-                    onScanRequested = {
-                        stateHolder.clearPlatformError()
-                        showQrScanner = true
+        ) {
+            composable(ROUTE_WORKSPACE) {
+                WorkspaceScreen(
+                    stateHolder = stateHolder,
+                    sessions = sessions,
+                    onOpenSession = { id ->
+                        stateHolder.selectSession(id)
+                        navController.navigate(ROUTE_CONVERSATION)
                     },
-                    onManualEntryRequested = {
-                        stateHolder.clearPlatformError()
-                        showManualPairing = true
+                    onNewSession = {
+                        // prepareNewSession 是 suspend，必须在协程里调用。
+                        shellScope.launch {
+                            if (stateHolder.prepareNewSession()) {
+                                navController.navigate(ROUTE_CONVERSATION)
+                            }
+                        }
                     }
                 )
             }
+            composable(ROUTE_CONVERSATION) {
+                // 任务详情页自带抽屉（本轮改动）：抽屉从应用外壳收敛到这里，
+                // 任务间切换/设备切换在详情页内完成，首页不再有抽屉入口。
+                WorkspaceDrawerHost(
+                    callbacks = drawerCallbacks,
+                    content = {
+                        ConversationScreen(
+                            stateHolder = stateHolder,
+                            onPickImage = onPickImage,
+                            onBack = navController::popBackStack
+                        )
+                    }
+                )
+            }
+            composable(ROUTE_SETTINGS) {
+                SettingsScreen(
+                    stateHolder = stateHolder,
+                    appVersionLabel = appVersionLabel,
+                    onOpenAgentPresets = { navController.navigate(ROUTE_SETTINGS_AGENT_PRESETS) },
+                    onOpenDefaultModel = { navController.navigate(ROUTE_SETTINGS_DEFAULT_MODEL) }
+                )
+            }
+            composable(ROUTE_SETTINGS_AGENT_PRESETS) {
+                AgentPresetSelectionScreen(stateHolder, navController::popBackStack)
+            }
+            composable(ROUTE_SETTINGS_DEFAULT_MODEL) {
+                DefaultModelSelectionScreen(stateHolder, navController::popBackStack)
+            }
+            composable(ROUTE_PLUGINS) {
+                DrawerDestinationScreen("插件", "插件功能尚未接入", navController::popBackStack)
+            }
+            composable(ROUTE_SCHEDULED_TASKS) {
+                ScheduledTasksScreen(
+                    stateHolder = stateHolder,
+                    onOpenSession = ::openSession,
+                    // FAB「＋」的新建动作：宿主网关没有「新建定时任务」协议（Web 端的
+                    // 「新建」同样引导开新会话），因此跳到首页并新建任务——定时任务
+                    // 由 Agent 在会话里创建，创建后回本页刷新可见。
+                    onNewTask = {
+                        shellScope.launch {
+                            navController.navigate(ROUTE_WORKSPACE) {
+                                popUpTo(ROUTE_WORKSPACE) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                            if (stateHolder.prepareNewSession()) {
+                                navController.navigate(ROUTE_CONVERSATION)
+                            }
+                        }
+                    }
+                )
+            }
+            composable(ROUTE_PROJECTS) {
+                ProjectsTabScreen(
+                    stateHolder = stateHolder,
+                    // 选中项目后回到任务列表：项目页恒由首页压栈，故 popBackStack 即回到
+                    // ROUTE_WORKSPACE。这样「点项目」的意图（去看它的任务）才有结果。
+                    onProjectSelected = navController::popBackStack
+                )
+            }
         }
-    }
+        // 核心页面保留完整切换导航（点 6）。二级下钻页（插件、Agent 预设、
+        // 默认模型）返回 null，不挂底栏——它们是下钻而非目的地。
+        //
+        // 底栏是 NavHost 的**兄弟节点**：页面切换时它保持不动（符合「常驻导航」的
+        // 预期），同时仍在抽屉的「滑动页面」内部，抽屉打开时会随内容一起右移。
+        //
+        // 键盘弹出时隐藏底栏（`showsBottomBar` 的第二个条件）：`adjustResize` 下键盘
+        // 缩小 layoutHeight，会把底栏顶到键盘正上方，与同样 `.imePadding()` 上浮的
+        // 输入框叠加，吃掉约 84dp 输入区。首页从不暴露此问题（它没有输入框）。
+        if (showsBottomBar) {
+            DshBottomBarHost(
+                selected = requireNotNull(tab),
+                onSelectTab = ::navigateToTab
+            )
+        }
+        }
+        }
 
     if (showQrScanner) {
         GatewayQrScannerScreen(
@@ -473,20 +495,21 @@ private fun DrawerDestinationScreen(title: String, message: String, onBack: () -
 }
 
 /**
- * 页面顶栏的**唯一**实现：返回圆钮 + 居中标题 + 右侧动作区。
+ * 页面顶栏的**唯一**实现：左侧按钮 + 居中标题 + 右侧动作区。
  *
- * 标题居中、字号统一取 [DshPageTitleFontSize]（18sp）。此前四个一级页面各写各的：
- * 项目页用本组件的左对齐 18sp、定时任务页手写 Row 用居中 20sp、设置页用 Material
- * 的 CenterAlignedTopAppBar 居中 17sp——同一个层级三种字号、两种对齐，切 Tab 时
- * 标题会跳。所有页面都必须走这里，不要再自己拼 Row 或换用 TopAppBar。
+ * 层级规则（本轮重整）：**Tab 根页面**（任务列表/项目/定时任务/设置）不渲染左侧按钮——
+ * 它们是平级目的地，切换走底栏，「后退」没有语义；**下钻页**（任务详情等）传 [onBack]
+ * 渲染返回钮。抽屉按钮（[onOpenDrawer]）与返回钮互斥：详情页包在抽屉宿主里时左侧
+ * 是抽屉钮，返回改走系统返回手势。
  *
- * 右侧 [actions] 与左侧返回钮等宽占位，保证标题在**整屏**居中而不是在剩余空间里居中。
+ * 标题居中、字号统一取 [DshPageTitleFontSize]（18sp）。左侧无按钮时渲染等宽空占位，
+ * 保证标题在**整屏**居中而不是在剩余空间里居中。
  */
 @Composable
 internal fun DshPageHeader(
     title: String,
-    onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
     subtitle: String? = null,
     connection: GatewayConnectionState? = null,
     onOpenDrawer: (() -> Unit)? = null,
@@ -503,19 +526,25 @@ internal fun DshPageHeader(
             .padding(horizontal = DshPageHeaderHorizontalPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 左侧按钮：首页是「打开侧边栏」，其余页面是「返回」。
-        // 两者用同一个尺寸 token，页头高度与内容基线因此完全一致。
-        if (onOpenDrawer != null) {
-            DshDrawerButton(
-                onClick = onOpenDrawer,
-                testTag = "brand-drawer-button"
-            )
-        } else {
-            TopBarCircleButton(
-                iconRes = R.drawable.ic_back_chevron,
-                description = "返回",
-                onClick = onBack
-            )
+        // 左侧槽位：抽屉钮（详情页）> 返回钮（下钻页）> 等宽空占位（Tab 根页面）。
+        // 三种状态同宽同高（[DshPageHeaderCircleButtonSize]），槽位本身由 Row 的
+        // CenterVertically 垂直居中——按钮因此与标题在同一中线上。
+        Box(
+            Modifier.size(DshPageHeaderCircleButtonSize),
+            contentAlignment = Alignment.Center
+        ) {
+            when {
+                onOpenDrawer != null -> DshDrawerButton(
+                    onClick = onOpenDrawer,
+                    size = DshPageHeaderCircleButtonSize,
+                    testTag = "brand-drawer-button"
+                )
+                onBack != null -> TopBarCircleButton(
+                    iconRes = R.drawable.ic_back_chevron,
+                    description = "返回",
+                    onClick = onBack
+                )
+            }
         }
         // 标题 + 可选副标题。**两种页面共用同一套行高**：即使没有副标题，
         // 标题也占据完整的两行区块（副标题位置留空），因此四个页面的标题
@@ -592,8 +621,13 @@ internal fun DshPageHeader(
                 }
             }
         }
-        // 右侧动作区宽度与左侧按钮一致，标题才是整屏居中。
-        Box(Modifier.size(DshPageHeaderCircleButtonSize), contentAlignment = Alignment.Center) {
+        // 右侧动作区：与左侧槽位同宽（标题才整屏居中）。槽位 46→40dp 收窄后，
+        // 详情页「抽屉 + 更多」两个钮会超出槽宽——动作区改为自适应宽度、内容右对齐，
+        // 高度仍锁定与左侧一致并由 Row 垂直居中。
+        Box(
+            Modifier.heightIn(min = DshPageHeaderCircleButtonSize),
+            contentAlignment = Alignment.Center
+        ) {
             actions()
         }
     }
@@ -609,6 +643,7 @@ internal fun DshPageHeader(
  * 页头走统一的 [DshPageHeader]：与项目/定时任务/设置**同一高度(56dp)、同一按钮尺寸
  * (46dp)、同一标题字号(18sp)与同一居中规则**。此前首页用的是另一套品牌头
  * （无固定高度、47dp 按钮、17–20sp 自适应标题），切页面时页头整体跳动。
+ * 抽屉按钮已随抽屉一起移到任务详情页（本轮改动），首页页头左侧不再有按钮。
  *
  * 页头之下是**单一** [LazyColumn]：新建任务与任务列表一起滚出屏幕。
  * 「最近活跃」分区标题已去掉——整页就是任务列表，不需要一个标题再声明一次。
@@ -617,8 +652,6 @@ internal fun DshPageHeader(
 private fun WorkspaceScreen(
     stateHolder: AndroidSharedStateHolder,
     sessions: List<SessionSummary>,
-    openDrawer: () -> Unit,
-    canScrollVertically: Boolean,
     onOpenSession: (String) -> Unit,
     onNewSession: () -> Unit
 ) {
@@ -632,40 +665,39 @@ private fun WorkspaceScreen(
     // 避免用户点了才看到报错。
     val canStartNewSession = !stateHolder.gatewayState.connection.dshBlocksNetworkActions
 
-    Column(Modifier.fillMaxSize().testTag("workspace-screen")) {
-        DshPageHeader(
-            title = "dsh-mobile",
-            onBack = {},
-            subtitle = runtimeHeaderSubtitle(
-                deviceLabel = stateHolder.activeGatewayDisplayName(),
-                workspaceLabel = selectedWorkspace?.title
-                    ?: if (ungroupedSelected) "未分组" else null
-            ),
-            connection = stateHolder.gatewayState.connection,
-            onOpenDrawer = openDrawer,
-            onTitleClick = { showRuntimeSettings = true }
+    // 统一走 DshTabScaffold：页头（设备|项目副标题 + 配对入口）+ 正文 + 右下角 FAB。
+    // 布局几何集中在骨架里，本页只提供语义（标题、副标题、FAB 的动作与禁用）。
+    DshTabScaffold(
+        title = "dsh-mobile",
+        subtitle = runtimeHeaderSubtitle(
+            deviceLabel = stateHolder.activeGatewayDisplayName(),
+            workspaceLabel = selectedWorkspace?.title
+                ?: if (ungroupedSelected) "未分组" else null
+        ),
+        connection = stateHolder.gatewayState.connection,
+        onTitleClick = { showRuntimeSettings = true },
+        modifier = Modifier.testTag("workspace-screen"),
+        fab = DshFabSpec(
+            onClick = onNewSession,
+            contentDescription = "新建任务",
+            testTag = "new-task-button",
+            // 未连接时新建会失败（prepareNewSession 会拒绝），先置灰，
+            // 避免用户点了才看到报错；空态文案里也指向这个入口。
+            enabled = canStartNewSession
         )
+    ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = DshScreenHorizontalPadding,
                 end = DshScreenHorizontalPadding,
                 top = DshSectionSpacing,
-                bottom = 24.dp
-            ),
-            // 抽屉横向拖动期间交出滚动权：否则在手势仲裁里和抽屉抢同一次拖动。
-            userScrollEnabled = canScrollVertically
+                // FAB 避让统一取公共常量，避免最后一条被 FAB 压住。
+                bottom = DshFabReservedHeight
+            )
         ) {
-            item(key = "home-new-task") {
-                DshNewTaskButton(
-                    // 与抽屉里的同名按钮保持一致（此前首页叫「新建会话」、抽屉叫
-                    // 「新建任务」，同一个动作两个叫法）。
-                    label = "新建任务",
-                    onClick = onNewSession,
-                    enabled = canStartNewSession
-                )
-                Spacer(Modifier.height(22.dp))
-            }
+            // 顶部胶囊「新建任务」已移到右下角 FAB（本轮 UI 统一：所有新增动作
+            // 一律右下角，与项目页/定时任务页一致），列表从页头下直接开始。
             // 任务列表本身就是这一页：不再有「最近活跃」标题，也没有内嵌滚动容器。
             taskListItems(
                 allSessions = sessions,
@@ -787,5 +819,5 @@ private fun localDayIndex(epochMillis: Long, timeZone: TimeZone): Long {
 }
 
 /** 当前主机的可读名称，用于顶栏副标题与抽屉账户卡。未配对时不重复产品名。 */
-private fun AndroidSharedStateHolder.activeGatewayDisplayName(): String =
+internal fun AndroidSharedStateHolder.activeGatewayDisplayName(): String =
     gatewayDisplayName.takeIf { it.isNotBlank() } ?: "未连接设备"

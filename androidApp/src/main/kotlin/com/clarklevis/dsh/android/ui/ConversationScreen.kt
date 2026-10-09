@@ -215,9 +215,12 @@ internal fun ConversationScreen(
     Scaffold(
         containerColor = palette.canvas,
         topBar = {
-            // 页头直接复用 DshPageHeader：与首页/项目/定时任务/设置**完全同一几何**
-            // （56dp 高、46dp 圆钮、18sp 居中标题）。此前这里用 Material 的 TopAppBar
-            // + expandedHeight 80dp，页头比列表页高出一截，切页面时明显跳动。
+            // 页头直接复用 DshPageHeader：与四个 Tab 根页**完全同一几何**
+            // （56dp 高、46dp 圆钮、18sp 居中标题）。
+            //
+            // 层级规则（本轮重整）：详情页是**下钻页**，左侧渲染返回钮回到任务列表
+            // （= 首页）；抽屉收敛到详情页后，抽屉钮放在右侧动作区「更多」旁边。
+            // Tab 根页面不渲染返回钮（层级切换走底栏），只有这里需要显式返回。
             DshPageHeader(
                 title = title,
                 onBack = {
@@ -225,21 +228,32 @@ internal fun ConversationScreen(
                     onBack()
                 },
                 actions = {
-                    ConversationMoreMenu(
-                        canBrowseFiles = stateHolder.snapshot.selectedSessionId != null &&
-                            stateHolder.gatewayState.connection == GatewayConnectionState.CONNECTED &&
-                            "file-downloads" in stateHolder.gatewayState.capabilities,
-                        onBrowseFiles = { showWorkspaceFiles = true },
-                        // 对话 / 轨迹 折进「更多」：它们原先以分段控件形式常驻在页头下方，
-                        // 一直占掉一行可视高度，而多数时间用户只看「对话」。
-                        selectedPage = pagerState.currentPage,
-                        onSelectPage = { target ->
-                            dismissInput()
-                            scope.launch { pagerState.animateScrollToPage(target) }
-                        },
-                        agentPresetLabel = agentPresetDisplayName(agentPresetId, agentPresetName),
-                        connection = stateHolder.gatewayState.connection
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // 抽屉入口在详情页（LocalDrawerOpener 由抽屉宿主提供）。
+                        // 尺寸走同一 token（40dp）：此前这里写死 40dp、左侧返回钮却是
+                        // 46dp，两个圆钮并排时大小不一。
+                        LocalDrawerOpener.current?.let { openDrawer ->
+                            DshDrawerButton(
+                                onClick = openDrawer,
+                                size = DshPageHeaderCircleButtonSize
+                            )
+                        }
+                        ConversationMoreMenu(
+                            canBrowseFiles = stateHolder.snapshot.selectedSessionId != null &&
+                                stateHolder.gatewayState.connection == GatewayConnectionState.CONNECTED &&
+                                "file-downloads" in stateHolder.gatewayState.capabilities,
+                            onBrowseFiles = { showWorkspaceFiles = true },
+                            // 对话 / 轨迹 折进「更多」：它们原先以分段控件形式常驻在页头下方，
+                            // 一直占掉一行可视高度，而多数时间用户只看「对话」。
+                            selectedPage = pagerState.currentPage,
+                            onSelectPage = { target ->
+                                dismissInput()
+                                scope.launch { pagerState.animateScrollToPage(target) }
+                            },
+                            agentPresetLabel = agentPresetDisplayName(agentPresetId, agentPresetName),
+                            connection = stateHolder.gatewayState.connection
+                        )
+                    }
                 }
             )
         }

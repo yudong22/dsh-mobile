@@ -2,17 +2,12 @@ package com.clarklevis.dsh.android.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,14 +24,6 @@ import com.clarklevis.dsh.shared.domain.SessionSummary
 import com.clarklevis.dsh.shared.gateway.GatewayConnectionState
 
 /**
- * 会话行的高度：`vertical = 18.dp` 是行内上下内边距，配合 16sp 标题后单行约 61dp。
- *
- * 抽成常量而不是内联，是因为它同时决定列表的「密度」与可点区域：此前 11dp 时
- * 行高约 47dp，长标题与时间挤在一起；加高后每屏条数变少，但一行更像一个可点目标。
- */
-internal val HOME_SESSION_ROW_PADDING = PaddingValues(horizontal = 14.dp, vertical = 18.dp)
-
-/**
  * 首页最近会话的投影：**已按项目过滤的会话**按最近活动时间倒序，**不截断**。
  *
  * 入参是 [workspaceScopedSessions] 的结果而不是原始会话表——项目过滤有且只有一份实现
@@ -45,8 +32,7 @@ internal val HOME_SESSION_ROW_PADDING = PaddingValues(horizontal = 14.dp, vertic
  * 排序在这里显式做：网关的 `sessions` 帧本身按 `lastActivityEpochSeconds` 倒序，
  * 但离线缓存的恢复路径不保证顺序，不重排会让冷启动后的首页顺序漂移。
  *
- * 不截断是有意的：首页列表就是这一屏的主体，条数上限交给滚动本身。此前截到 6 条时
- * 「最近活跃」覆盖不到稍早的任务，用户还得开抽屉才能找到，而抽屉只是同一份数据的第二个视图。
+ * 不截断是有意的：首页列表就是这一屏的主体，条数上限交给滚动本身。
  */
 internal fun homeRecentSessions(scopedSessions: List<SessionSummary>): List<SessionSummary> =
     scopedSessions.sortedByDescending(SessionSummary::lastActivityEpochSeconds)
@@ -79,41 +65,40 @@ internal fun LazyListScope.taskListItems(
         }
         return
     }
-    itemsIndexed(sessions, key = { _, session -> session.id }) { index, session ->
-        SessionRowActions(
-            session = session,
-            onClick = { onOpenSession(session.id) },
-            onRename = onRenameSession,
-            onArchive = onArchiveSession,
-            contentPadding = HOME_SESSION_ROW_PADDING,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.testTag("home-session-${session.id}")
-        ) {
-            SessionActivityDot(session = session)
-            Text(
-                text = session.title,
-                color = dshPalette().textPrimary,
-                fontSize = 16.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
-            Text(
-                text = if (session.isRunning) "运行中" else relativeTime(session.lastActivityEpochSeconds),
-                color = if (session.isRunning) DshColors.Success else dshPalette().textTertiary,
-                fontSize = 13.sp,
-                maxLines = 1,
-                modifier = Modifier.testTag("home-session-time-${session.id}"),
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
-        }
-        if (index != sessions.lastIndex) {
-            Box(
-                Modifier.fillMaxWidth().padding(start = 14.dp)
-                    .height(1.dp)
-                    .background(dshPalette().divider)
-            )
+    // 公共「分组圆角列表」行样式（与项目页同一套，DshGroupedList.kt）：
+    // 整组一个圆角容器 + 行间分隔线，行内仍是 状态点 + 标题 + 时间。
+    // 长按菜单（重命名/归档）由 SessionRowActions 承载，保持不变。
+    item(key = "home-session-list") {
+        DshGroupedSection(label = "任务", showCount = true, count = sessions.size) {
+            sessions.forEachIndexed { index, session ->
+                if (index > 0) DshGroupedRowDivider()
+                SessionRowActions(
+                    session = session,
+                    onClick = { onOpenSession(session.id) },
+                    onRename = onRenameSession,
+                    onArchive = onArchiveSession,
+                    modifier = Modifier.testTag("home-session-${session.id}")
+                ) {
+                    SessionActivityDot(session = session)
+                    Text(
+                        text = session.title,
+                        color = dshPalette().textPrimary,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                    )
+                    Text(
+                        text = if (session.isRunning) "运行中" else relativeTime(session.lastActivityEpochSeconds),
+                        color = if (session.isRunning) DshColors.Success else dshPalette().textTertiary,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        modifier = Modifier.testTag("home-session-time-${session.id}"),
+                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                    )
+                }
+            }
         }
     }
 }
@@ -148,7 +133,8 @@ private fun HomeRecentEmptyState(connection: GatewayConnectionState) {
         DshConnectionPhase.IN_PROGRESS -> "正在连接…会话到达后会自动出现在这里。"
         DshConnectionPhase.ATTENTION -> "连接不可用。恢复连接后这里会显示当前项目的最近会话。"
         // 这里引用了首页按钮的文案，改名时必须一起改，否则空态会指向一个不存在的按钮。
-        DshConnectionPhase.ONLINE -> "当前项目还没有任务，点上面的「新建任务」开始一个。"
+        // 文案指向右下角 FAB「＋」（本轮 UI 统一后新建任务入口已从页头下移）。
+        DshConnectionPhase.ONLINE -> "当前项目还没有任务，点右下角「＋」开始一个。"
         DshConnectionPhase.IDLE -> "连接设备后，这里会按最近活动时间列出当前项目的会话。"
     }
     Box(

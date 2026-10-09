@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,9 +67,10 @@ import com.clarklevis.dsh.shared.protocol.GatewayReasoningEffort
 @Composable
 internal fun SettingsScreen(
     stateHolder: AndroidSharedStateHolder,
-    onBack: () -> Unit,
     onOpenAgentPresets: () -> Unit,
-    onOpenDefaultModel: () -> Unit
+    onOpenDefaultModel: () -> Unit,
+    // 账户头显示用：外壳已算好的「v1.9.4」样式版本号（LocalContext 只取一次）。
+    appVersionLabel: String? = null
 ) {
     var showPermissionPicker by remember { mutableStateOf(false) }
     var pendingPermission by remember { mutableStateOf<String?>(null) }
@@ -76,10 +78,9 @@ internal fun SettingsScreen(
     val pageBackground = palette.canvas
     LaunchedEffect(stateHolder.gatewayState.connection) { stateHolder.refreshProductState(force = true) }
     Scaffold(
-        // 统一走 DshPageHeader：此前这里用的是 Material 的 CenterAlignedTopAppBar，
-        // 标题 17sp 居中，与其余页面不一致（Material 默认还带一层自己的高度与图标尺寸，
-        // 与自定义顶栏混用会造成顶栏高度细微跳动）。
-        topBar = { DshPageHeader(title = "设置", onBack = onBack) },
+        // Tab 根页面：无返回钮（层级切换走底栏）。页面名从「设置」改为「我的」，
+        // 与参考图 1 的信息架构一致：这页是「账户 + 个人偏好」，不是纯配置。
+        topBar = { DshPageHeader(title = "我的") },
         containerColor = pageBackground
     ) { padding ->
         LazyColumn(
@@ -92,6 +93,63 @@ internal fun SettingsScreen(
                         .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(22.dp)
                 ) {
+                    // ── 账户头 ──（参考图 1「我的」页的身份区：头像 + 产品名 + 状态/版本）
+                    // 此前这页没有身份显示，产品名与版本只能靠翻设置项得知。
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Box(
+                            Modifier.size(56.dp).background(palette.primary.copy(alpha = 0.12f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "D",
+                                color = palette.primary,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                "dsh-mobile",
+                                color = palette.textPrimary,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                StatusIndicatorDot(
+                                    color = dshConnectionDotColor(stateHolder.gatewayState.connection, palette),
+                                    modifier = Modifier.size(7.dp),
+                                    glowing = stateHolder.gatewayState.connection == GatewayConnectionState.CONNECTED
+                                )
+                                Text(
+                                    "${homeConnectionBadge(stateHolder.gatewayState.connection)} · $appVersionLabel",
+                                    color = palette.textSecondary,
+                                    fontSize = 13.sp,
+                                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                                )
+                            }
+                        }
+                    }
+                    // ── 通用 ──（图 1 第一组：主题/语言等外观偏好）
+                    SettingsSection(title = "通用") {
+                        InterfaceStyleSettingsRow()
+                        SettingsDivider()
+                        LanguageSettingsRow()
+                    }
+                    SettingsSection(
+                        title = "通知",
+                        footer = stringResource(R.string.settings_notify_in_background_summary)
+                    ) {
+                        NotificationSettingsRow()
+                    }
+                    // ── 新会话默认配置 ──（需要网关在线；放「通用/通知」之后）
                     SettingsSection(
                         title = "新会话默认配置",
                         footer = "与 WebUI 使用同一份部署级设置。修改只影响之后新建的会话，运行中的会话保持启动时的配置。"
@@ -131,6 +189,7 @@ internal fun SettingsScreen(
                             onPermissionSelected = { pendingPermission = it }
                         )
                     }
+                    // ── 网关 ──（连接管理 + 部署信息，图 1 没有对应组，沿用卡片分组）
                     SettingsSection("Mobile Gateway") {
                         GatewayEndpointRow(stateHolder)
                         SettingsDivider()
@@ -170,20 +229,6 @@ internal fun SettingsScreen(
                                 SettingsValueRow("cwd", cwd)
                             }
                         }
-                    }
-                    SettingsSection(
-                        title = "外观",
-                        footer = "语言设置将在重新启动应用后生效。当前仅支持简体中文，其他系统语言将显示中文。"
-                    ) {
-                        InterfaceStyleSettingsRow()
-                        SettingsDivider()
-                        LanguageSettingsRow()
-                    }
-                    SettingsSection(
-                        title = stringResource(R.string.settings_notifications_section),
-                        footer = stringResource(R.string.settings_notify_in_background_summary)
-                    ) {
-                        NotificationSettingsRow()
                     }
                     stateHolder.platformError?.let { error ->
                         Text(error, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
@@ -658,11 +703,16 @@ private fun SettingsValueRow(
 ) {
     val rowAlpha = if (enabled) 1f else 0.4f
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 54.dp)
+        // 行几何统一走 token（对照参考图 1：64dp 宽松行高、17sp 标题、15sp 灰值、16dp chevron）。
+        Modifier.fillMaxWidth().heightIn(min = DshSettingsRowMinHeight)
             .clickable(enabled = enabled && onClick != null) { onClick?.invoke() },
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, color = MaterialTheme.colorScheme.onSurface.copy(alpha = rowAlpha), fontSize = 16.sp)
+        Text(
+            title,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = rowAlpha),
+            fontSize = DshSettingsTitleFontSize
+        )
         Spacer(Modifier.weight(1f).padding(horizontal = 6.dp))
         if (isLoading) {
             CircularProgressIndicator(
@@ -674,7 +724,7 @@ private fun SettingsValueRow(
             Text(
                 value,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.52f else 0.3f),
-                fontSize = 14.sp,
+                fontSize = DshSettingsValueFontSize,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -684,7 +734,7 @@ private fun SettingsValueRow(
                 painterResource(R.drawable.ic_chevron_right),
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.30f else 0.15f),
-                modifier = Modifier.padding(start = 8.dp).size(12.dp)
+                modifier = Modifier.padding(start = 8.dp).size(DshSettingsChevronSize)
             )
         }
     }
@@ -713,13 +763,13 @@ internal fun InterfaceStyleSettingsRow() {
 internal fun NotificationSettingsRow() {
     val notifications = LocalAgentNotificationSettings.current
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 54.dp),
+        Modifier.fillMaxWidth().heightIn(min = DshSettingsRowMinHeight),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             stringResource(R.string.settings_notify_in_background),
             color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 16.sp
+            fontSize = DshSettingsTitleFontSize
         )
         Spacer(Modifier.weight(1f).padding(horizontal = 6.dp))
         Switch(
@@ -807,8 +857,8 @@ private fun GatewayEndpointRow(stateHolder: AndroidSharedStateHolder) {
     BasicTextField(
         value = stateHolder.endpoint,
         onValueChange = { stateHolder.endpoint = it },
-        modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
-        textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = DshSettingsRowMinHeight),
+        textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = DshSettingsTitleFontSize),
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
         singleLine = true,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -830,12 +880,12 @@ private fun GatewayEndpointRow(stateHolder: AndroidSharedStateHolder) {
 @Composable
 private fun GatewayStatusRow(stateHolder: AndroidSharedStateHolder) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 54.dp),
+        Modifier.fillMaxWidth().heightIn(min = DshSettingsRowMinHeight),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Box(Modifier.size(9.dp).background(statusColor(stateHolder), CircleShape))
-        Text(connectionLabel(stateHolder), fontSize = 16.sp)
+        Text(connectionLabel(stateHolder), fontSize = DshSettingsTitleFontSize)
         Spacer(Modifier.weight(1f))
         stateHolder.gatewayState.serverPort?.let { port ->
             Text(
@@ -850,13 +900,13 @@ private fun GatewayStatusRow(stateHolder: AndroidSharedStateHolder) {
 @Composable
 private fun SettingsActionRow(title: String, enabled: Boolean = true, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 54.dp).clickable(enabled = enabled, onClick = onClick),
+        Modifier.fillMaxWidth().heightIn(min = DshSettingsRowMinHeight).clickable(enabled = enabled, onClick = onClick),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             title,
             color = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.35f),
-            fontSize = 16.sp
+            fontSize = DshSettingsTitleFontSize
         )
     }
 }

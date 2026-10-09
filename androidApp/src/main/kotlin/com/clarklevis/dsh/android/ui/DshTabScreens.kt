@@ -1,47 +1,28 @@
 package com.clarklevis.dsh.android.ui
 
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.PlatformTextStyle
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.clarklevis.dsh.android.AndroidSharedStateHolder
 import com.clarklevis.dsh.android.R
+import com.clarklevis.dsh.shared.domain.SessionSummary
+import com.clarklevis.dsh.shared.protocol.GatewayWorkspace
 
 /**
  * 「项目」标签：工作区（项目）列表，支持切换与新增。
@@ -57,18 +38,20 @@ import com.clarklevis.dsh.android.R
 @Composable
 internal fun ProjectsTabScreen(
     stateHolder: AndroidSharedStateHolder,
-    onBack: () -> Unit,
-    onProjectSelected: () -> Unit = onBack
+    onProjectSelected: () -> Unit
 ) {
     val palette = dshPalette()
     var showDirectoryBrowser by remember { mutableStateOf(false) }
     val workspaces = stateHolder.availableWorkspaces
     // 用派生状态读取，避免整个「项目」页因 conversation 的每 token 发布会话而重组。
     val sessions = stateHolder.homeSessions
-    val ungroupedSessionCount = remember(sessions, workspaces) {
-        sessions.count { session ->
-            session.isVisibleInHistory && workspaces.none { session.id in it.sessionIds }
-        }
+    // 每个项目的行内详情（最新任务 / 时间 / 运行态）：按 workspaceId 建一次索引，
+    // 列表滚动期间不再逐行扫描 sessions（此前 workspaceScopedSessions 每行都要过滤全表）。
+    val latestByWorkspace = remember(sessions, workspaces) {
+        buildWorkspaceActivityIndex(sessions, workspaces)
+    }
+    val pendingApprovalSessionIds = remember(stateHolder.snapshot.pendingApprovals) {
+        stateHolder.snapshot.pendingApprovals.mapTo(mutableSetOf()) { it.sessionId }
     }
     // 刷新以连接相位为 key：原先是 LaunchedEffect(Unit)，若首次进入时离线，
     // 请求被状态层静默跳过，之后连接恢复也不会重跑，页面会长期停在缓存或空态。
@@ -76,81 +59,96 @@ internal fun ProjectsTabScreen(
     LaunchedEffect(connection) { stateHolder.refreshProductState(force = true) }
     // 目录浏览要读远端目录，离线时必须禁用（此前「＋」始终可点，点了才弹「请先连接」）。
     val canBrowse = !connection.dshBlocksNetworkActions
-    Scaffold(
-        containerColor = palette.canvas,
-        topBar = {
-            DshPageHeader(title = "项目", onBack = onBack) {
-                DshTonalCircleButton(
-                    iconRes = R.drawable.ic_add,
-                    // description 保持稳定（读屏与测试都依赖它），禁用**原因**由下方
-                    // 的 footer 文案承载，而不是塞进无障碍标签里。
-                    description = "添加项目",
-                    enabled = canBrowse,
-                    onClick = { showDirectoryBrowser = true }
-                )
-            }
-        }
-    ) { paddingValues ->
+    // 统一走 DshTabScaffold：页头（设备副标题 + 配对入口）+ 正文 + 右下角 FAB。
+    // 本页只提供语义：列表内容、FAB 的动作与离线禁用条件。
+    DshTabScaffold(
+        title = "项目",
+        subtitle = stateHolder.activeGatewayDisplayName(),
+        connection = connection,
+        fab = DshFabSpec(
+            onClick = { showDirectoryBrowser = true },
+            contentDescription = "添加项目",
+            testTag = "projects-fab",
+            // 目录浏览要读远端目录，离线时必须禁用；禁用**原因**由下方 DshHintText 承载，
+            // 不塞进无障碍标签。
+            enabled = canBrowse
+        )
+    ) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(paddingValues).testTag("projects-list"),
+            modifier = Modifier.fillMaxSize().testTag("projects-list"),
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
-                ProjectCard(
-                    title = "未分组",
-                    detail = "$ungroupedSessionCount 个未归属任务",
-                    selected = stateHolder.isUngroupedWorkspaceSelected,
-                    testTag = "project-card-ungrouped",
-                    onClick = {
-                        stateHolder.selectWorkspace(AndroidSharedStateHolder.UNGROUPED_WORKSPACE_ID)
-                        onProjectSelected()
-                    }
-                )
+                DshGroupedSection(label = "未分组") {
+                    val activity = latestByWorkspace[UNGROUPED_ACTIVITY_KEY]
+                    DshGroupedRow(
+                        title = "未分组",
+                        tileLabel = DshTileInitials("未分组"),
+                        secondLine = activity?.toSecondLine(pendingApprovalSessionIds),
+                        fallbackSubtitle = "未归属到任何项目的任务",
+                        timeLabel = activity?.let { relativeTime(it.lastActivityEpochSeconds) },
+                        timeHighlighted = activity?.let { it.isRunning || it.sessionId in pendingApprovalSessionIds } == true,
+                        selected = stateHolder.isUngroupedWorkspaceSelected,
+                        // 测试直接点击该行（AndroidUiParityDeviceTest），tag 必须挂在
+                        // 可点击的 Row 上而不是分组容器——容器不可点，点击会变成死区。
+                        testTag = "project-card-ungrouped",
+                        onClick = {
+                            stateHolder.selectWorkspace(AndroidSharedStateHolder.UNGROUPED_WORKSPACE_ID)
+                            onProjectSelected()
+                        }
+                    )
+                }
             }
-            items(workspaces, key = { it.workspaceId }) { workspace ->
-                ProjectCard(
-                    title = workspace.title,
-                    detail = workspace.path,
-                    selected = workspace.workspaceId == stateHolder.selectedWorkspaceId,
-                    testTag = "project-card-${workspace.workspaceId}",
-                    onClick = {
-                        stateHolder.selectWorkspace(workspace.workspaceId)
-                        onProjectSelected()
+            if (workspaces.isNotEmpty()) {
+                item {
+                    DshGroupedSection(label = "项目", showCount = true, count = workspaces.size) {
+                        workspaces.forEachIndexed { index, workspace ->
+                            val activity = latestByWorkspace[workspace.workspaceId]
+                            if (index > 0) DshGroupedRowDivider()
+                            DshGroupedRow(
+                                title = workspace.title,
+                                tileLabel = DshTileInitials(workspace.title),
+                                secondLine = activity?.toSecondLine(pendingApprovalSessionIds),
+                                fallbackSubtitle = workspace.path,
+                                timeLabel = activity?.let { relativeTime(it.lastActivityEpochSeconds) },
+                                timeHighlighted = activity?.let { it.isRunning || it.sessionId in pendingApprovalSessionIds } == true,
+                                selected = workspace.workspaceId == stateHolder.selectedWorkspaceId,
+                                testTag = "project-card-${workspace.workspaceId}",
+                                onClick = {
+                                    stateHolder.selectWorkspace(workspace.workspaceId)
+                                    onProjectSelected()
+                                }
+                            )
+                        }
                     }
-                )
+                }
             }
             // 空态必须区分「真的没有项目」和「连不上所以看不到」：
             // 离线时沿用旧的「还没有项目」会误导用户以为网关上确实没有项目
             // （对比首页空态已按 dshPhase 分四档，HomeRecentSessions.kt:206）。
             if (workspaces.isEmpty()) {
                 item {
-                    Text(
+                    DshHintText(
                         if (connection.dshPhase == DshConnectionPhase.ONLINE) {
-                            "还没有项目。点击右上角「＋」把网关上的目录添加为项目。"
+                            "还没有项目。点右下角「＋」把网关上的目录添加为项目。"
                         } else {
                             "${homeConnectionBadge(connection)}，连接后可查看网关上的项目。"
                         },
-                        color = palette.textTertiary,
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
                         modifier = Modifier.padding(top = 8.dp)
                     )
                 }
             }
-            // 离线时「＋」被禁用，必须说明原因，否则是一个「点了没反应」的死入口。
+            // 离线时 FAB 被禁用，必须说明原因，否则是一个「点了没反应」的死入口。
             if (!canBrowse) {
                 item {
-                    Text(
+                    DshHintText(
                         "未连接网关，暂时无法添加项目。",
-                        color = palette.textTertiary,
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
                         modifier = Modifier.padding(top = 8.dp)
                     )
                 }
             }
-            item { Spacer(Modifier.height(24.dp)) }
+            item { Spacer(Modifier.height(DshFabReservedHeight)) }
         }
     }
     if (showDirectoryBrowser) {
@@ -161,64 +159,68 @@ internal fun ProjectsTabScreen(
     }
 }
 
-@Composable
-private fun ProjectCard(
-    title: String,
-    detail: String,
-    selected: Boolean,
-    testTag: String,
-    onClick: () -> Unit
-) {
-    val palette = dshPalette()
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(palette.surface, DshCardCornerRadius)
-            .border(
-                if (selected) 1.5.dp else 1.dp,
-                if (selected) palette.primary else palette.cardBorder,
-                DshCardCornerRadius
+/** 「未分组」在 [buildWorkspaceActivityIndex] 结果里的 key：真实 workspaceId 不会是它。 */
+private const val UNGROUPED_ACTIVITY_KEY = "__ungrouped__"
+
+/** 一行项目可展示的「最新动态」：该项目最近一次活动的任务摘要。 */
+internal data class WorkspaceActivity(
+    val sessionId: String,
+    val taskTitle: String,
+    val lastActivityEpochSeconds: Double,
+    val isRunning: Boolean
+)
+
+/**
+ * 把会话按项目归组后取每组的最新一条：项目行详情（任务名 / 时间 / 状态点）的数据源。
+ *
+ * 归组语义与 [workspaceScopedSessions] 一致——「未分组」= 不在任何项目的 `sessionIds`
+ * 里的可见会话；这是项目过滤的**第二份消费者**，若语义改动必须两处同步。
+ * 每组只留 `lastActivityEpochSeconds` 最大的那条，列表行的「最新任务」即它。
+ */
+internal fun buildWorkspaceActivityIndex(
+    sessions: List<SessionSummary>,
+    workspaces: List<GatewayWorkspace>
+): Map<String, WorkspaceActivity> {
+    val latest = HashMap<String, WorkspaceActivity>()
+    val assigned = HashSet<String>()
+    fun consider(key: String, session: SessionSummary) {
+        val current = latest[key]
+        if (current == null || session.lastActivityEpochSeconds > current.lastActivityEpochSeconds) {
+            latest[key] = WorkspaceActivity(
+                sessionId = session.id,
+                taskTitle = session.title,
+                lastActivityEpochSeconds = session.lastActivityEpochSeconds,
+                isRunning = session.isRunning
             )
-            .clickable(onClick = onClick)
-            .semantics { this.selected = selected }
-            .testTag(testTag)
-            .padding(horizontal = 16.dp, vertical = 15.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Image(
-            painter = painterResource(R.drawable.ic_folder_outline),
-            contentDescription = null,
-            modifier = Modifier.size(21.dp),
-            colorFilter = ColorFilter.tint(if (selected) palette.primary else palette.textSecondary)
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                title,
-                color = palette.textPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
-            Text(
-                detail,
-                color = palette.textTertiary,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
-        }
-        if (selected) {
-            Box(Modifier.size(18.dp).background(palette.primary, CircleShape), contentAlignment = Alignment.Center) {
-                Image(
-                    painter = painterResource(R.drawable.ic_menu_check),
-                    contentDescription = null,
-                    modifier = Modifier.size(11.dp),
-                    colorFilter = ColorFilter.tint(palette.surface)
-                )
-            }
         }
     }
+    for (workspace in workspaces) {
+        val byId = sessions.associateByTo(HashMap()) { it.id }
+        for (sessionId in workspace.sessionIds) {
+            val session = byId[sessionId] ?: continue
+            if (!session.isVisibleInHistory) continue
+            assigned += sessionId
+            consider(workspace.workspaceId, session)
+        }
+    }
+    for (session in sessions) {
+        if (session.isVisibleInHistory && session.id !in assigned) {
+            consider(UNGROUPED_ACTIVITY_KEY, session)
+        }
+    }
+    return latest
 }
+
+/** 把项目「最新动态」映射成公共行组件的副行：状态点（待批准=琥珀 / 运行=绿 / 其他=灰）+ 任务名。 */
+private fun WorkspaceActivity.toSecondLine(pendingApprovalSessionIds: Set<String>): DshRowSecondLine =
+    DshRowSecondLine(
+        text = taskTitle,
+        accessibleText = "最新任务 $taskTitle",
+        dotColor = { palette ->
+            when {
+                sessionId in pendingApprovalSessionIds -> DshColors.Amber
+                isRunning -> DshColors.Success
+                else -> palette.textTertiary
+            }
+        }
+    )

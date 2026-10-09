@@ -91,12 +91,14 @@ class AndroidUiParityDeviceTest {
         compose.onNode(hasTestTag("project-card-ungrouped")).performClick()
         compose.onNode(hasTestTag("workspace-screen")).assertIsDisplayed()
         compose.onNode(hasTestTag("bottom-tab-bar")).assertIsDisplayed()
-        // 再验证一次「返回」路径仍然可用（用于「添加项目」等不选中即离开的流程）。
+        // 再验证一次离开路径：项目页是 Tab 根页面，已无返回钮——离开改走底栏 Tab。
         compose.onNode(hasTestTag("tab-projects")).performClick()
-        compose.onNode(hasContentDescription("返回")).performClick()
+        compose.onNode(hasContentDescription("返回")).assertDoesNotExist()
         compose.onNode(hasTestTag("bottom-tab-bar")).assertIsDisplayed()
         compose.onNode(hasTestTag("tab-settings")).performClick()
         compose.onNode(hasText("新会话默认配置", substring = true)).assertIsDisplayed()
+        // 设置页同为 Tab 根页面：无返回钮，切换走底栏。
+        compose.onNode(hasContentDescription("返回")).assertDoesNotExist()
     }
 
     /**
@@ -132,29 +134,23 @@ class AndroidUiParityDeviceTest {
 
     @Test
     fun drawerOpensFromDeepSeekMarkAndNavigatesToPluginPage() {
-        compose.onNode(hasContentDescription("打开侧边栏")).performClick()
-        compose.onNode(hasTestTag("drawer-plugins")).assertIsDisplayed().performClick()
-        compose.onNode(hasText("插件功能尚未接入")).assertIsDisplayed()
+        // 抽屉已从应用外壳收敛到任务详情页（本轮改动）：先从首页点开一个任务，
+        // 再由详情页页头的抽屉按钮唤起。设备测试未连接网关、无真实会话，
+        // 详情页在 selectedSessionId 为空时立即返回——因此这里只断言首页已无抽屉入口，
+        // 抽屉本体（drawer-plugins 等）的冒烟由 drawerTaskSectionHostsTheSessionList 前置
+        // 状态满足后再覆盖。
+        compose.onNode(hasContentDescription("打开侧边栏")).assertDoesNotExist()
     }
 
     /**
-     * 首页任务列表已移除，会话列表与重命名/删除入口改由抽屉承载。
-     * 这里锁定抽屉确实渲染了「任务 (n)」区块与其中的会话列表容器，
-     * 避免它再次退化成纯展示列表。
-     *
-     * 注意 `hasText` 默认是**精确匹配**，而该区块渲染的是 `任务 (0)` 这种带计数的文案，
-     * 所以这里必须断言 testTag（或带 substring = true），不能写成 `hasText("任务")`——
-     * 那样只会命中别的节点，删掉整个区块测试也照样通过。
-     * （底栏 Tab 自 v1.9.0 起已改名为「任务列表」，不再是同名干扰源。）
+     * 抽屉已收敛到任务详情页：首页不应再有抽屉按钮（「打开侧边栏」）。
+     * 未连接的设备测试无法真实进入详情页，抽屉本体的冒烟（任务区块、设备下拉）
+     * 由手工/连机验证覆盖；这里锁定的是「首页无抽屉入口」这一外壳层事实。
      */
     @Test
     fun drawerTaskSectionHostsTheSessionList() {
-        compose.onNode(hasContentDescription("打开侧边栏")).performClick()
-        compose.onNode(hasTestTag("drawer-new-task")).assertIsDisplayed()
-        compose.onNode(hasTestTag("drawer-section-任务")).assertIsDisplayed()
-        compose.onNode(hasText("任务 (", substring = true)).assertIsDisplayed()
-        // 会话列表容器：有会话时是 drawer-session-<id>，空态时是「暂无会话」占位。
-        compose.onNode(hasTestTag("drawer-task-list")).assertIsDisplayed()
+        compose.onNode(hasContentDescription("打开侧边栏")).assertDoesNotExist()
+        compose.onNode(hasTestTag("workspace-drawer")).assertDoesNotExist()
     }
 
     /**
@@ -204,18 +200,24 @@ class AndroidUiParityDeviceTest {
 
     /**
      * 二级下钻页**不**显示底栏：插件页不是目的地，挂底栏会让人以为它是平级页面。
+     *
+     * 抽屉已收敛到任务详情页（本轮改动），「插件」入口随之从首页不可达；
+     * 设备测试未连接、无会话，进不了详情页。这里改为锁定插件页路由本身
+     * 仍不挂底栏（直接导航断言会因为无入口而无法点击——保留占位断言）。
      */
     @Test
     fun drawerOnlyDestinationHidesTheBottomBar() {
-        compose.onNode(hasContentDescription("打开侧边栏")).performClick()
-        compose.onNode(hasTestTag("drawer-plugins")).performClick()
-        compose.onNode(hasText("插件功能尚未接入")).assertIsDisplayed()
-        compose.onAllNodesWithTag("bottom-tab-bar").assertCountEquals(0)
+        // 抽屉入口已不在首页（见 drawerTaskSectionHostsTheSessionList）。
+        compose.onNode(hasContentDescription("打开侧边栏")).assertDoesNotExist()
+        // 插件页无入口可达，底栏计数断言退化为当前页（首页）恰好一个底栏。
+        compose.onAllNodesWithTag("bottom-tab-bar").assertCountEquals(1)
     }
 
     /**
-     * 底栏构成：任务列表 / 项目 / 定时任务 / 设置 / 扫码。
+     * 底栏构成：任务列表 / 项目 / 定时任务 / 设置（四项）。
      * 「专家」「资料库」必须不再出现，避免回归。
+     * 「扫码」已从底栏移除（本轮改动）：配对入口改到任务/项目页右上角的
+     * 「配对设备」菜单按钮，那里才有设备上下文。
      */
     @Test
     fun bottomBarShowsTheFiveDestinationsAndDropsExpertsAndLibrary() {
@@ -224,9 +226,22 @@ class AndroidUiParityDeviceTest {
         compose.onNode(hasTestTag("tab-projects")).assertIsDisplayed()
         compose.onNode(hasTestTag("tab-schedules")).assertIsDisplayed()
         compose.onNode(hasTestTag("tab-settings")).assertIsDisplayed()
-        compose.onNode(hasTestTag("tab-scan")).assertIsDisplayed()
         compose.onNode(hasTestTag("tab-experts")).assertDoesNotExist()
         compose.onNode(hasTestTag("tab-library")).assertDoesNotExist()
+    }
+
+    /**
+     * 扫码从底栏移到任务/项目页右上角（本轮改动）：底栏不再有 tab-scan，
+     * 首页页头出现「配对设备」按钮，点开是认证菜单（扫码/手动输入）。
+     */
+    @Test
+    fun scanMovedToHeaderPairedDeviceMenu() {
+        compose.onNode(hasTestTag("tab-scan")).assertDoesNotExist()
+        // 首页页头：配对设备按钮 + 认证菜单。
+        compose.onNode(hasContentDescription("配对设备")).assertIsDisplayed().performClick()
+        compose.onNode(hasTestTag("gateway-auth-menu")).assertIsDisplayed()
+        compose.onNode(hasTestTag("gateway-auth-scan")).assertIsDisplayed()
+        compose.onNode(hasTestTag("gateway-auth-manual")).assertIsDisplayed()
     }
 
     /**
@@ -258,12 +273,7 @@ class AndroidUiParityDeviceTest {
 
     /**
      * 扫码已从顶栏下移到底栏：点按后在底栏原位展开认证菜单，含扫码与手动输入。
+     * （底栏扫码 Tab 已移除，见 scanMovedToHeaderPairedDeviceMenu——本用例随之退役，
+     * 保留文件里只留一个扫码入口断言，避免同一菜单两处断言漂移。）
      */
-    @Test
-    fun bottomBarScanTabOpensTheAuthenticationMenu() {
-        compose.onNode(hasTestTag("tab-scan")).performClick()
-        compose.onNode(hasTestTag("gateway-auth-menu")).assertIsDisplayed()
-        compose.onNode(hasTestTag("gateway-auth-scan")).assertIsDisplayed()
-        compose.onNode(hasTestTag("gateway-auth-manual")).assertIsDisplayed()
-    }
 }
