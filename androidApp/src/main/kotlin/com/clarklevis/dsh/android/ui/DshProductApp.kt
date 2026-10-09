@@ -19,11 +19,11 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -514,9 +514,16 @@ internal fun DshPageHeader(
     connection: GatewayConnectionState? = null,
     onOpenDrawer: (() -> Unit)? = null,
     onTitleClick: (() -> Unit)? = null,
+    /**
+     * 右侧动作区的宽度。默认与左侧按钮槽位等宽，使标题**整屏居中**。
+     * 需要放多个动作时显式给一个更大的值——左侧占位会自动取同样宽度，
+     * 标题仍居中（两侧对称）。不要让动作区自适应增长，那会把标题推离中线。
+     */
+    actionsWidth: androidx.compose.ui.unit.Dp? = null,
     actions: @Composable () -> Unit = {}
 ) {
     val palette = dshPalette()
+    val sideSlotWidth = actionsWidth ?: DshPageHeaderCircleButtonSize
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -526,11 +533,10 @@ internal fun DshPageHeader(
             .padding(horizontal = DshPageHeaderHorizontalPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 左侧槽位：抽屉钮（详情页）> 返回钮（下钻页）> 等宽空占位（Tab 根页面）。
-        // 三种状态同宽同高（[DshPageHeaderCircleButtonSize]），槽位本身由 Row 的
-        // CenterVertically 垂直居中——按钮因此与标题在同一中线上。
+        // 左侧槽位：抽屉钮（详情页）> 返回钮（下钻页）> 空占位（Tab 根页面）。
+        // 宽度与右侧动作区**对称**，标题因此落在整屏中线上。
         Box(
-            Modifier.size(DshPageHeaderCircleButtonSize),
+            Modifier.width(sideSlotWidth).height(DshPageHeaderCircleButtonSize),
             contentAlignment = Alignment.Center
         ) {
             when {
@@ -621,11 +627,14 @@ internal fun DshPageHeader(
                 }
             }
         }
-        // 右侧动作区：与左侧槽位同宽（标题才整屏居中）。槽位 46→40dp 收窄后，
-        // 详情页「抽屉 + 更多」两个钮会超出槽宽——动作区改为自适应宽度、内容右对齐，
-        // 高度仍锁定与左侧一致并由 Row 垂直居中。
+        // 右侧动作区**必须与左侧槽位等宽**，标题才是整屏居中而不是在剩余空间里居中。
+        //
+        // 此前这里放宽成自适应宽度以容纳「抽屉 + 更多」两个按钮，代价是标题被推离中线
+        // （真机实测定时任务页标题偏左 28dp）。需要放多个动作的页面应改用
+        // [DshPageHeader.actionsWidth] 显式声明，并同步给左侧占位同样的宽度，
+        // 而不是让动作区无限增长。
         Box(
-            Modifier.heightIn(min = DshPageHeaderCircleButtonSize),
+            Modifier.width(actionsWidth ?: DshPageHeaderCircleButtonSize),
             contentAlignment = Alignment.Center
         ) {
             actions()
@@ -676,6 +685,9 @@ private fun WorkspaceScreen(
         ),
         connection = stateHolder.gatewayState.connection,
         onTitleClick = { showRuntimeSettings = true },
+        // 任务列表是通栏列表：白底与行同色，滚动时整屏一体（参考微信通讯录）。
+        // 项目/定时任务页仍用画布灰，白色卡片才会浮起来。
+        bodyIsWhite = true,
         modifier = Modifier.testTag("workspace-screen"),
         fab = DshFabSpec(
             onClick = onNewSession,

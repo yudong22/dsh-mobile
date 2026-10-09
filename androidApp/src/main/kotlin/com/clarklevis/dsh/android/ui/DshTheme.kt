@@ -103,14 +103,16 @@ internal val DshBodyFontSize = 15.sp
 internal val DshCaptionFontSize = 13.sp
 
 /**
- * 「我的」页与子设置页的行几何（对照参考图 1/2）：
- * 行最小高 64dp、标题 17sp、右侧值 15sp 灰、chevron 16dp。
- * 此前设置行 54dp/16sp、值 14sp，与参考图的宽松行距不符；
- * 抽出来统一管理，避免每个设置页各写各的。
+ * 「我的」页与子设置页的行几何。
+ *
+ * 字号**对齐 App 的通用层级**（[DshBodyFontSize] 15sp 正文 / [DshCaptionFontSize] 13sp 辅助��，
+ * 不再单独放大：此前照参考图取 17sp/15sp，比列表页（15sp/12sp）大两档，
+ * 四个 Tab 之间切换时文字明显跳一档（真机截图对比确认）。
+ * 行高保留 56dp 的宽松感——那是设置项该有的疏朗，字号则与全局一致。
  */
-internal val DshSettingsRowMinHeight = 64.dp
-internal val DshSettingsTitleFontSize = 17.sp
-internal val DshSettingsValueFontSize = 15.sp
+internal val DshSettingsRowMinHeight = 56.dp
+internal val DshSettingsTitleFontSize = DshBodyFontSize
+internal val DshSettingsValueFontSize = DshCaptionFontSize
 internal val DshSettingsChevronSize = 16.dp
 
 /**

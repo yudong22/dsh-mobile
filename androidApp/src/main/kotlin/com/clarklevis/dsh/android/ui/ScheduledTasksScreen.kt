@@ -106,10 +106,6 @@ internal fun ScheduledTasksScreen(
         title = "定时任务",
         subtitle = stateHolder.activeGatewayDisplayName(),
         connection = connection,
-        headerStatus = DshHeaderStatus(
-            text = homeConnectionBadge(connection),
-            highlighted = connection == GatewayConnectionState.CONNECTED
-        ),
         modifier = Modifier
             .background(palette.canvas)
             .navigationBarsPadding()
@@ -358,34 +354,38 @@ private fun ScheduledTaskCard(
                 Modifier.fillMaxWidth().clickable {
                     if (SystemClock.uptimeMillis() >= suppressCardTapUntil) onOpenSession()
                 }
-                    .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 18.dp)
+                    // 内边距对齐列表页的层级（DshGroupedRow 用 12dp/13dp）：
+                    // 此前 20dp/20dp 是旧「大卡片」时代的遗留，与其他页比明显偏松。
+                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 12.dp)
             ) {
-                Text(shortRule(task), fontSize = 15.sp, fontWeight = FontWeight.Medium, color = palette.primary)
+                // 字号对齐 App 的通用层级：正文 15sp、辅助 12sp（DshGroupedRow 同源）。
+                // 此前标题 21sp / 正文 16sp，比其他页大出两档，切换 Tab 时突兀。
+                Text(shortRule(task), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = palette.primary)
                 Text(
-                    task.title, fontSize = 21.sp, fontWeight = FontWeight.SemiBold,
+                    task.title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                     color = palette.textPrimary,
-                    modifier = Modifier.padding(top = 8.dp)
+                    modifier = Modifier.padding(top = 4.dp)
                 )
                 Text(
-                    task.prompt, fontSize = 16.sp, lineHeight = 22.sp,
+                    task.prompt, fontSize = 13.sp, lineHeight = 18.sp,
                     color = palette.textSecondary,
                     maxLines = 3, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 11.dp)
+                    modifier = Modifier.padding(top = 6.dp)
                 )
             }
-            HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = palette.divider)
+            HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = palette.divider)
             Row(
                 Modifier.fillMaxWidth().clickable {
                     if (SystemClock.uptimeMillis() >= suppressCardTapUntil) {
                         if (revealedTaskId == task.id) onRevealChange(null)
                         else expanded = !expanded
                     }
-                }.padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+                }.padding(start = 16.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     if (task.status == "active") formatScheduleDate(task.scheduledAt) else "已结束",
-                    color = palette.textSecondary, fontSize = 15.sp,
+                    color = palette.textSecondary, fontSize = 12.sp,
                     modifier = Modifier.weight(1f)
                 )
                 Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
@@ -404,8 +404,8 @@ private fun ScheduledTaskCard(
             ) {
                 Column(
                     Modifier.fillMaxWidth()
-                        .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 22.dp),
-                    verticalArrangement = Arrangement.spacedBy(13.dp)
+                        .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     ScheduleDetail("执行规则", fullRule(task))
                     ScheduleDetail("下次计划时间", if (task.status == "active") formatScheduleDate(task.scheduledAt) else "无")
@@ -421,10 +421,11 @@ private fun ScheduledTaskCard(
 @Composable
 private fun ScheduleDetail(label: String, value: String) {
     val palette = dshPalette()
+    // 13sp 与 ScheduleDetail 之外的辅助文字同为一级（App 里正文 15sp、辅助 12–13sp）。
     Row(Modifier.fillMaxWidth()) {
-        Text(label, fontSize = 14.sp, color = palette.textSecondary,
-            modifier = Modifier.size(width = 92.dp, height = 22.dp))
-        Text(value, fontSize = 14.sp, lineHeight = 20.sp, color = palette.textPrimary,
+        Text(label, fontSize = 13.sp, color = palette.textSecondary,
+            modifier = Modifier.size(width = 92.dp, height = 20.dp))
+        Text(value, fontSize = 13.sp, lineHeight = 19.sp, color = palette.textPrimary,
             modifier = Modifier.weight(1f))
     }
 }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -50,6 +51,9 @@ import com.clarklevis.dsh.android.R
  *
  * 任何页面要新的分组列表，先从这里取组件；不要回退到「每行一张独立大卡」的旧样式。
  */
+
+/** 通讯录式通栏列表的行高（参考微信通讯录 56dp）。 */
+internal val DshContactRowHeight = 56.dp
 
 /** 组标题行 + 共享圆角容器。容器描边/分隔线颜色都取 palette，深浅色自适应。 */
 @Composable
@@ -352,5 +356,109 @@ internal fun DshHintText(
         lineHeight = 20.sp,
         modifier = modifier,
         style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+    )
+}
+
+/**
+ * 通讯录式的**通栏列表行**（参考微信「通讯录」）：
+ * 白底、不套卡片容器、行高 56dp、标题 16sp，右侧为时间/状态与可选尾部箭头。
+ *
+ * 与 [DshGroupedRow] 的区别是**布局体系不同**，不是样式微调：
+ *  - [DshGroupedRow] 是「卡片列表」——整组一个圆角 surface，行在卡片内；
+ *  - 本组件是「通栏列表」——行直接铺满屏宽、与画布同色，靠分隔线分组，
+ *    这正是通讯录/消息列表的观感（行多、滚动长，卡片边框会显得很重）。
+ *
+ * 两个体系并存是有意的：项目/定时任务是「少量、需强调归属」的卡片列表，
+ * 任务列表是「大量、需扫读」的通栏列表。
+ */
+@Composable
+internal fun DshContactRow(
+    title: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leading: (@Composable () -> Unit)? = null,
+    trailingText: String? = null,
+    trailingHighlighted: Boolean = false,
+    showChevron: Boolean = false,
+    testTag: String? = null
+) {
+    val palette = dshPalette()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(palette.surface)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = title }
+            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
+            // 行高对齐通讯录：56dp 内容高（16sp 标题在垂直方向有余量，长按目标也够大）
+            .heightIn(min = DshContactRowHeight)
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        leading?.invoke()
+        Text(
+            text = title,
+            color = palette.textPrimary,
+            fontSize = 16.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+        )
+        if (trailingText != null) {
+            Text(
+                text = trailingText,
+                color = if (trailingHighlighted) DshColors.Success else palette.textTertiary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+            )
+        }
+        if (showChevron) {
+            Image(
+                painter = painterResource(R.drawable.ic_chevron_right),
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                colorFilter = ColorFilter.tint(palette.textTertiary)
+            )
+        }
+    }
+}
+
+/**
+ * 通讯录式的**分组头**：13sp 次级文字、通栏。
+ *
+ * 底色**跟随正文**（[DshContactHostBackground]）而不是写死画布灰：任务列表正文是白的，
+ * 分组头若用灰底就会在白的列表上方割出一条色带。
+ */
+@Composable
+internal fun DshContactSectionHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    background: androidx.compose.ui.graphics.Color? = null
+) {
+    val palette = dshPalette()
+    Text(
+        text = title,
+        color = palette.textSecondary,
+        fontSize = 13.sp,
+        modifier = modifier
+            .fillMaxWidth()
+            .background(background ?: palette.surface)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+    )
+}
+
+/**
+ * 通讯录式的分隔线：**左缩进对齐文字起点**（微信里从文字左侧起，不与整行同宽）。
+ */
+@Composable
+internal fun DshContactDivider(startIndent: androidx.compose.ui.unit.Dp = 16.dp) {
+    val palette = dshPalette()
+    HorizontalDivider(
+        color = palette.divider,
+        modifier = Modifier.padding(start = startIndent)
     )
 }

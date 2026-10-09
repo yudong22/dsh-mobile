@@ -3,12 +3,11 @@ package com.clarklevis.dsh.android.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -16,7 +15,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,41 +63,43 @@ internal fun LazyListScope.taskListItems(
         }
         return
     }
-    // 公共「分组圆角列表」行样式（与项目页同一套，DshGroupedList.kt）：
-    // 整组一个圆角容器 + 行间分隔线，行内仍是 状态点 + 标题 + 时间。
-    // 长按菜单（重命名/归档）由 SessionRowActions 承载，保持不变。
-    item(key = "home-session-list") {
-        DshGroupedSection(label = "任务", showCount = true, count = sessions.size) {
-            sessions.forEachIndexed { index, session ->
-                if (index > 0) DshGroupedRowDivider()
-                SessionRowActions(
-                    session = session,
-                    onClick = { onOpenSession(session.id) },
-                    onRename = onRenameSession,
-                    onArchive = onArchiveSession,
-                    modifier = Modifier.testTag("home-session-${session.id}")
-                ) {
-                    SessionActivityDot(session = session)
-                    Text(
-                        text = session.title,
-                        color = dshPalette().textPrimary,
-                        fontSize = 15.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                    )
-                    Text(
-                        text = if (session.isRunning) "运行中" else relativeTime(session.lastActivityEpochSeconds),
-                        color = if (session.isRunning) DshColors.Success else dshPalette().textTertiary,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        modifier = Modifier.testTag("home-session-time-${session.id}"),
-                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                    )
-                }
-            }
+    // 参考微信「通讯录」的**通栏列表**：白底、行直接铺满、分隔线左缩进对齐文字。
+    // 与项目/定时任务页的「卡片列表」（DshGroupedSection）是两套并存的布局体系——
+    // 任务列表条目多、需要快速扫读，卡片边框会让整屏显得很重；
+    // 项目/定时任务条目少、需要强调归属，卡片更合适。
+    if (sessions.size > 1) {
+        item(key = "home-session-section-header") {
+            DshContactSectionHeader("任务")
         }
+    }
+    itemsIndexed(sessions, key = { _, s -> s.id }) { index, session ->
+        SessionRowActions(
+            session = session,
+            onClick = { onOpenSession(session.id) },
+            onRename = onRenameSession,
+            onArchive = onArchiveSession,
+            modifier = Modifier.testTag("home-session-${session.id}")
+        ) {
+            SessionActivityDot(session = session)
+            Text(
+                text = session.title,
+                color = dshPalette().textPrimary,
+                fontSize = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+            )
+            Text(
+                text = if (session.isRunning) "运行中" else relativeTime(session.lastActivityEpochSeconds),
+                color = if (session.isRunning) DshColors.Success else dshPalette().textTertiary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                modifier = Modifier.testTag("home-session-time-${session.id}"),
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+            )
+        }
+        if (index != sessions.lastIndex) DshContactDivider()
     }
 }
 

@@ -35,8 +35,9 @@ import com.clarklevis.dsh.shared.gateway.GatewayConnectionState
  *
  * @param title 页头标题
  * @param subtitle 副标题；默认取当前连接设备（[stateHolder] 版本见重载）
- * @param connection 连接状态：为副标题渲染状态点，也为阶段标签提供相位
- * @param headerStatus 页头右侧的相位短标签（如「离线」）；null 表示不显示
+ * @param connection 连接状态：为副标题渲染状态点，并在过渡/故障态补一句相位说明
+ * @param bodyIsWhite 正文底色是否用白色。任务列表（通栏列表）用白底，与行同色、
+ *   滚动时整屏一体（微信通讯录的观感）；项目/定时任务用画布灰，让白色卡片浮起来。
  * @param showPairingEntry 是否在页头右侧渲染「配对设备」菜单
  * @param onTitleClick 页头标题点击（首页进「任务运行设置」）
  * @param fab 右下角主行动按钮；null 表示该页无 FAB（例如定时任务加载中）
@@ -50,33 +51,38 @@ internal fun DshTabScaffold(
     subtitle: String? = null,
     connection: GatewayConnectionState? = null,
     onTitleClick: (() -> Unit)? = null,
-    headerStatus: DshHeaderStatus? = null,
+    bodyIsWhite: Boolean = false,
     showPairingEntry: Boolean = true,
     fab: DshFabSpec? = null,
     content: @Composable () -> Unit
 ) {
     val palette = dshPalette()
+    // 相位文案并入副标题行（状态点已由 DshPageHeader 渲染），不再单独占右上角：
+    //  - 语义上它和副标题同属「当前连接」信息，放一起更好读；
+    //  - 布局上右侧动作区只留配对按钮一个，宽度可控、与左侧占位对称，
+    //    标题保持整屏居中（此前塞两个元素把标题推偏 28dp）。
+    // 文案遵循既有约定（DshConnectionStateUi.dshConnectionDetailText）：
+    // **已连接是常态、不额外占字**，只有过渡态/故障态才说明当前状态。
+    val subtitleText = listOfNotNull(
+        subtitle?.takeIf { it.isNotBlank() },
+        DshTabScaffoldHeaderStatus(connection)
+    ).joinToString("  ·  ")
+
     Scaffold(
-        containerColor = palette.canvas,
+        containerColor = if (bodyIsWhite) palette.surface else palette.canvas,
         topBar = {
             DshPageHeader(
                 title = title,
-                subtitle = subtitle,
+                subtitle = subtitleText.takeIf { it.isNotBlank() },
                 connection = connection,
                 onTitleClick = onTitleClick,
                 actions = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        headerStatus?.let { DshHeaderStatusLabel(it) }
-                        if (showPairingEntry) {
-                            LocalScanActions.current?.let { actions ->
-                                DshScanMenuButton(
-                                    onScanRequested = actions.onScanRequested,
-                                    onManualEntryRequested = actions.onManualEntryRequested
-                                )
-                            }
+                    if (showPairingEntry) {
+                        LocalScanActions.current?.let { actions ->
+                            DshScanMenuButton(
+                                onScanRequested = actions.onScanRequested,
+                                onManualEntryRequested = actions.onManualEntryRequested
+                            )
                         }
                     }
                 }
@@ -110,24 +116,11 @@ internal data class DshFabSpec(
     val iconRes: Int = com.clarklevis.dsh.android.R.drawable.ic_add
 )
 
-/** [DshTabScaffold] 页头右侧的相位短标签（「已连接」「离线」等）。 */
-internal data class DshHeaderStatus(
-    val text: String,
-    val highlighted: Boolean
-)
-
 /**
- * 相位标签：与副标题的状态点同源（[homeConnectionBadge]），
- * 已连接用成功色、其余用三级文字色。断网时列表是缓存，必须有标识。
+ * 副标题行要追加的相位说明。**已连接返回 null**——它是常态，不值得占字；
+ * 只有过渡态与故障态才说明（沿用 [dshConnectionDetailText] 的既有约定，
+ * 与之同源，避免同一个连接状态在两处各写一套文案）。
  */
-@Composable
-private fun DshHeaderStatusLabel(status: DshHeaderStatus) {
-    val palette = dshPalette()
-    androidx.compose.material3.Text(
-        text = status.text,
-        color = if (status.highlighted) DshColors.Success else palette.textTertiary,
-        fontSize = 13.sp,
-        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
-        modifier = Modifier.padding(end = 2.dp)
-    )
+private val DshTabScaffoldHeaderStatus: (GatewayConnectionState?) -> String? = { connection ->
+    connection?.let { dshConnectionDetailText(it) }
 }
