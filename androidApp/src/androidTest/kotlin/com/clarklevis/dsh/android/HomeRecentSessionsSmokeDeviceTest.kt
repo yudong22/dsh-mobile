@@ -64,7 +64,7 @@ class HomeRecentSessionsSmokeDeviceTest {
                 compose.onAllNodes(hasTestTag("home-session-same-session"))
                     .fetchSemanticsNodes().isNotEmpty()
             }
-            compose.onNodeWithTag("home-recent-sessions").assertExists()
+            compose.onNodeWithTag("workspace-screen").assertExists()
             // 列表不再截断，因此也不该再有「全部 N」这种「被截掉了，去别处看」的入口。
             compose.onNodeWithTag("home-recent-show-all").assertDoesNotExist()
             // 会话行点进去应打开会话页（首页正文不再只是展示）。
@@ -75,7 +75,7 @@ class HomeRecentSessionsSmokeDeviceTest {
                 hosts.activeGraph.stateHolder.snapshot.selectedSessionId == "same-session"
             }
             compose.waitUntil(timeoutMillis = 10_000) {
-                compose.onAllNodes(hasTestTag("home-recent-sessions"))
+                compose.onAllNodes(hasTestTag("home-session-same-session"))
                     .fetchSemanticsNodes().isEmpty()
             }
         } finally {

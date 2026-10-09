@@ -76,20 +76,10 @@ internal fun SettingsScreen(
     val pageBackground = palette.canvas
     LaunchedEffect(stateHolder.gatewayState.connection) { stateHolder.refreshProductState(force = true) }
     Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("设置", fontSize = 17.sp, fontWeight = FontWeight.SemiBold) },
-                navigationIcon = {
-                    TopBarCircleButton(
-                        iconRes = R.drawable.ic_back_chevron,
-                        description = "返回",
-                        onClick = onBack,
-                        modifier = Modifier.padding(start = 8.dp)
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = pageBackground)
-            )
-        },
+        // 统一走 DshPageHeader：此前这里用的是 Material 的 CenterAlignedTopAppBar，
+        // 标题 17sp 居中，与其余页面不一致（Material 默认还带一层自己的高度与图标尺寸，
+        // 与自定义顶栏混用会造成顶栏高度细微跳动）。
+        topBar = { DshPageHeader(title = "设置", onBack = onBack) },
         containerColor = pageBackground
     ) { padding ->
         LazyColumn(

@@ -79,8 +79,10 @@ private val drawerPageShape = RoundedCornerShape(48.dp)
  *
  * 设备行（图标 + 在线绿点 + 主机名 + 展开箭头）→ 新建任务胶囊 →
  * `活跃 (n)` 区块（近 24 小时有活动的任务，快速入口）→
- * `任务 (n)` 区块（当前项目下的全部会话）→ `空间 (n)` 区块 →
- * 次级入口（插件 / 定时任务）→ 分隔线 → 账户卡。
+ * `任务 (n)` 区块（当前项目下的全部任务）→ 次级入口（插件）→ 分隔线 → 账户卡。
+ *
+ * 「活跃」与「项目」两个区块已移除：前者与「任务」列表只是同一份数据的两种截断，
+ * 后者与底栏「项目」Tab 重复（项目切换统一走底栏）。抽屉现在只保留一个任务列表。
  *
  * 会话的长按菜单可重命名 / 归档，是首页任务列表之外唯一的会话管理入口，必须保留。
  * 「插件」入口为本产品既有功能，参考截图无对应项，按不因改版丢能力的原则保留。
@@ -88,19 +90,12 @@ private val drawerPageShape = RoundedCornerShape(48.dp)
 @Composable
 internal fun WorkspaceDrawer(
     sessions: List<SessionSummary>,
-    // 近 24 小时有活动的任务（已按当前项目过滤、按最近活动倒序）：抽屉「活跃」区块的
-    // 快速入口，点击与「任务」区块走同一套 onOpenSession → 任务对话页。由外壳用
-    // `drawerActiveSessions` 计算后传入，抽屉不自己再筛一遍。
-    drawerActiveSessions: List<SessionSummary>,
     gatewayLabel: String,
     connection: GatewayConnectionState,
     deviceIsServer: Boolean,
     devices: List<DrawerDeviceOption>,
     onSelectDevice: (String) -> Unit,
     onPairNewDevice: () -> Unit,
-    spaces: List<GatewayWorkspace>,
-    selectedWorkspaceId: String?,
-    ungroupedSelected: Boolean,
     accountName: String,
     accountPlan: String,
     accountQuota: String?,
@@ -108,7 +103,6 @@ internal fun WorkspaceDrawer(
     onNewSession: () -> Unit,
     onRenameSession: (String, String) -> Unit,
     onArchiveSession: (String) -> Unit,
-    onSelectWorkspace: (String?) -> Unit,
     onPlugins: () -> Unit,
     content: @Composable (openDrawer: () -> Unit, canScrollVertically: Boolean) -> Unit
 ) {
@@ -139,12 +133,8 @@ internal fun WorkspaceDrawer(
         val canScrollVertically by remember {
             derivedStateOf { !horizontalDragActive && offsetPx == 0f }
         }
-        // 两个区块各自可折叠，与标题上的箭头语义一致。
+        // 任务区块可折叠，与标题上的箭头语义一致。
         var tasksExpanded by remember { mutableStateOf(true) }
-        // 「活跃」是默认展开的快捷入口：近 24 小时刚动过的任务优先露出，方便秒开。
-        var activeExpanded by remember { mutableStateOf(true) }
-        // 「项目」是次级导航，默认收起：展开它会挤掉任务列表的可视高度。
-        var spacesExpanded by remember { mutableStateOf(false) }
 
         fun settle(open: Boolean, velocity: Float = 0f) {
             animationJob?.cancel()
@@ -275,40 +265,6 @@ internal fun WorkspaceDrawer(
                     modifier = Modifier.weight(1f).fillMaxWidth().testTag("drawer-task-list"),
                     contentPadding = PaddingValues(bottom = 8.dp)
                 ) {
-                    // 「活跃」区块：近 24 小时有活动的任务，作为高频快捷入口。它与「任务」
-                    // 区块一起在同一个 LazyColumn 内滚动，标题也作为列表项，保证两者滚动一致。
-                    // 它排在「任务」之前，让「刚动过的任务」一眼就能点进去，不必在完整历史里找。
-                    // 点击与「任务」行走同一套 onOpenSession → 任务对话页；切换任务后必须收起
-                    // 抽屉，否则半开着盖住刚切过去的任务对话页。
-                    if (drawerActiveSessions.isNotEmpty()) {
-                        item {
-                            DrawerSectionHeader(
-                                label = "活跃",
-                                count = drawerActiveSessions.size,
-                                expanded = activeExpanded,
-                                onToggle = { activeExpanded = !activeExpanded },
-                                palette = palette
-                            )
-                        }
-                        if (activeExpanded) {
-                            itemsIndexed(
-                                drawerActiveSessions,
-                                key = { _, session -> "active-${session.id}" }
-                            ) { _, session ->
-                                DrawerSessionRow(
-                                    session = session,
-                                    palette = palette,
-                                    isLast = false,
-                                    onClick = {
-                                        settle(open = false)
-                                        onOpenSession(session.id)
-                                    },
-                                    onRename = onRenameSession,
-                                    onArchive = onArchiveSession
-                                )
-                            }
-                        }
-                    }
                     item {
                         DrawerSectionHeader(
                             label = "任务",
@@ -382,46 +338,6 @@ internal fun WorkspaceDrawer(
                                     onArchive = onArchiveSession
                                 )
                             }
-                        }
-                    }
-                    // 项目区块：与「任务」并列的第二组。默认**收起**——它是次级导航，
-                    // 展开会挤占任务列表的可视高度（任务列表才是这一屏的主体）。
-                    item {
-                        DrawerSectionHeader(
-                            label = "项目",
-                            count = spaces.size + 1,
-                            expanded = spacesExpanded,
-                            onToggle = { spacesExpanded = !spacesExpanded },
-                            palette = palette
-                        )
-                    }
-                    if (spacesExpanded) {
-                        item {
-                            DrawerSpaceRow(
-                                label = "未分组",
-                                iconRes = R.drawable.ic_tab_experts,
-                                selected = ungroupedSelected,
-                                palette = palette,
-                                testTag = "drawer-space-ungrouped",
-                                // 必须传显式的 UNGROUPED_WORKSPACE_ID，不能传 null：
-                                // `resolveWorkspaceSelection(null, ...)` 在项目列表非空时会回退成
-                                // `workspaces.first()`（AndroidSharedStateHolder.kt:2609），
-                                // 于是「点未分组却选中了第一个项目」，首页标题与此处选中态同时说谎。
-                                // 项目页的同名入口一直是显式传 id 的（DshTabScreens.kt:98）。
-                                onClick = {
-                                    onSelectWorkspace(AndroidSharedStateHolder.UNGROUPED_WORKSPACE_ID)
-                                }
-                            )
-                        }
-                        itemsIndexed(spaces, key = { _, w -> w.workspaceId }) { _, workspace ->
-                            DrawerSpaceRow(
-                                label = workspace.title,
-                                iconRes = R.drawable.ic_tab_projects,
-                                selected = workspace.workspaceId == selectedWorkspaceId,
-                                palette = palette,
-                                testTag = "drawer-space-${workspace.workspaceId}",
-                                onClick = { onSelectWorkspace(workspace.workspaceId) }
-                            )
                         }
                     }
                 }
@@ -550,6 +466,16 @@ private fun DrawerSessionRow(
             modifier = Modifier.weight(1f),
             style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
         )
+        // 时间显示：与首页列表同一套相对时间（relativeTime），运行中优先显示状态。
+        // 抽屉此前只有标题，用户无法判断哪条是刚动过的，只能靠顺序猜。
+        Text(
+            text = if (session.isRunning) "运行中" else relativeTime(session.lastActivityEpochSeconds),
+            color = if (session.isRunning) DshColors.Success else palette.textTertiary,
+            fontSize = 13.sp,
+            maxLines = 1,
+            modifier = Modifier.testTag("drawer-session-time-${session.id}"),
+            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+        )
     }
     if (!isLast) {
         Box(
@@ -622,40 +548,6 @@ private fun DrawerSectionHeader(
 }
 
 /** 空间条目：左侧线性图标 + 名称，选中项用主色区分。 */
-@Composable
-private fun DrawerSpaceRow(
-    label: String,
-    iconRes: Int,
-    selected: Boolean,
-    palette: DshPalette,
-    testTag: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 30.dp, vertical = 11.dp)
-            .testTag(testTag),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Image(
-            painter = painterResource(iconRes),
-            contentDescription = null,
-            modifier = Modifier.size(23.dp),
-            colorFilter = ColorFilter.tint(if (selected) palette.primary else palette.textPrimary)
-        )
-        Text(
-            text = label,
-            color = if (selected) palette.primary else palette.textPrimary,
-            fontSize = 17.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-        )
-    }
-}
-
 @Composable
 private fun DrawerItem(
     label: String,

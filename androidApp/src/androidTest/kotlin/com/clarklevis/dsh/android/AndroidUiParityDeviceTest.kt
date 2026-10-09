@@ -122,10 +122,11 @@ class AndroidUiParityDeviceTest {
      */
     @Test
     fun homeListsRecentSessionsForTheCurrentWorkspace() {
-        compose.onNode(hasTestTag("home-recent-sessions")).assertIsDisplayed()
-        compose.onNode(hasTestTag("home-recent-status")).assertIsDisplayed()
-        compose.onNodeWithText("最近活跃").assertIsDisplayed()
-        // 未连接时给的是引导语，不能出现带会话数的「暂无会话」式空态（那是连接中/已连接的语义）。
+        // 首页与任务列表已合并为单一整页滚动列表：「最近活跃」分区标题与
+        // home-recent-sessions 容器都已移除（列表本身即页面）。
+        compose.onNode(hasTestTag("workspace-screen")).assertIsDisplayed()
+        compose.onNodeWithText("最近活跃").assertDoesNotExist()
+        // 未连接时给的是引导语，不能出现带会话数的「暂无会话」式空态（那是连接中/已连���的语义）。
         compose.onNode(hasText("暂无会话")).assertDoesNotExist()
     }
 

@@ -163,7 +163,7 @@ private fun DshTabItem(
 internal fun DshDrawerButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: Dp = 47.dp,
+    size: Dp = DshPageHeaderCircleButtonSize,
     testTag: String = "drawer-button"
 ) {
     val palette = dshPalette()
@@ -184,118 +184,6 @@ internal fun DshDrawerButton(
                 )
             }
         }
-    }
-}
-
-/**
- * 截图首页顶部的品牌胶囊：左侧圆形菜单按钮 + 两行标题（主标题 + 设备/工作空间副标题）。
- *
- * 标题区域整体可点击，点击弹出「任务运行设置」面板。
- */
-@Composable
-internal fun DshBrandHeader(
-    title: String,
-    subtitle: String,
-    connection: GatewayConnectionState,
-    onOpenDrawer: () -> Unit,
-    onOpenRuntimeSettings: () -> Unit,
-    modifier: Modifier = Modifier,
-    trailing: @Composable () -> Unit = {}
-) {
-    val palette = dshPalette()
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // 保留既有 testTag，避免影响依赖它的用例；视觉由共享组件统一。
-        DshDrawerButton(
-            onClick = onOpenDrawer,
-            testTag = "brand-drawer-button"
-        )
-        Row(
-            modifier = Modifier.padding(start = 14.dp).weight(1f)
-                .clip(RoundedCornerShape(12.dp))
-                .clickable(role = Role.Button, onClick = onOpenRuntimeSettings)
-                .semantics { contentDescription = "任务运行设置" }
-                .testTag("brand-runtime-settings-button")
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = title,
-                    color = palette.textPrimary,
-                    // 品牌名比参考截图的标题长得多（"DeepSeek Harness" vs "WorkBuddy"），
-                    // 因此按宽度自动降档字号而不是省略成 "DeepSeek …"；
-                    // 仍未放下时才退回尾部省略，避免任何情况下溢出。
-                    autoSize = TextAutoSize.StepBased(
-                        minFontSize = 17.sp,
-                        maxFontSize = 24.sp,
-                        stepSize = 1.sp
-                    ),
-                    lineHeight = 28.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    // 连接状态点：已连接绿、连接中琥珀（并转圈）、失败红、未连接灰。
-                    // 原先这里是静态的云图标，看不出连接状态。
-                    StatusIndicatorDot(
-                        color = dshConnectionDotColor(connection, palette),
-                        modifier = Modifier.size(7.dp).testTag("header-connection-dot"),
-                        glowing = connection == GatewayConnectionState.CONNECTED
-                    )
-                    Text(
-                        text = subtitle,
-                        modifier = Modifier.weight(1f, fill = false),
-                        color = palette.textTertiary,
-                        // 网关主机名可能很长（如 denisMacBook-M5.local），同样按宽度降档，
-                        // 尽量把 `设备 | 工作空间` 两段都展示出来。
-                        autoSize = TextAutoSize.StepBased(
-                            minFontSize = 11.sp,
-                            maxFontSize = 14.sp,
-                            stepSize = 0.5.sp
-                        ),
-                        lineHeight = 17.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                    )
-                    // `›` 紧跟在副标题（`设备 | 工作空间`）之后，而不是放到整行末尾：
-                    // 整行都是 `brand-runtime-settings-button` 的点击区，箭头贴着「未分组」
-                    // 才读得出「点这里进设置」；放到连接状态词后面会被读成状态词的一部分。
-                    Image(
-                        painter = painterResource(R.drawable.ic_chevron_right),
-                        contentDescription = null,
-                        modifier = Modifier
-                            .padding(horizontal = 2.dp)
-                            .size(14.dp)
-                            .testTag("header-runtime-settings-chevron"),
-                        colorFilter = ColorFilter.tint(palette.textTertiary)
-                    )
-                    // 过渡/失败态追加状态词，已连接是常态就不再赘述。
-                    dshConnectionDetailText(connection)?.let { detail ->
-                        Text(
-                            text = detail,
-                            color = dshConnectionDotColor(connection, palette),
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
-                            modifier = Modifier.testTag("header-connection-status")
-                        )
-                    }
-                }
-            }
-        }
-        trailing()
     }
 }
 

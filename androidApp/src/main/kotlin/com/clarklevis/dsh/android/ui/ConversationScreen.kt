@@ -319,7 +319,7 @@ internal fun TopBarCircleButton(
     val palette = dshPalette()
     val shadowColor = Color.Black.copy(alpha = if (palette.isDark) 0.24f else 0.07f)
     Box(
-        modifier = modifier.size(46.dp)
+        modifier = modifier.size(DshPageHeaderCircleButtonSize)
             .dropShadow(
                 shape = CircleShape,
                 shadow = Shadow(

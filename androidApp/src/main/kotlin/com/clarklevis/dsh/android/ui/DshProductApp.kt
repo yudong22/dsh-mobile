@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -25,7 +26,9 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,6 +42,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalContext
@@ -51,6 +55,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -132,13 +137,6 @@ internal fun DshProductApp(
             selectedWorkspaceId = stateHolder.selectedWorkspaceId
         )
     }
-    // 抽屉「活跃」区块：近 24 小时有活动的任务，**跨全部项目**（不限当前项目），
-    // 按最近活动倒序。`drawerActiveSessions` 只做 24h 窗口筛选与排序，输入用未做项目过滤的
-    // homeSessions，这样活跃区能露出其它项目的任务；点它走 onOpenSession 直接切进对话页，
-    // 跨项目切换由既有的 selectSession 路径负责，不在这里再引入项目过滤源。
-    val drawerActiveSessions = remember(homeSessions) {
-        drawerActiveSessions(homeSessions)
-    }
     val context = LocalContext.current
     val appVersionLabel = remember(context) {
         runCatching {
@@ -200,7 +198,6 @@ internal fun DshProductApp(
 
     WorkspaceDrawer(
         sessions = sessions,
-        drawerActiveSessions = drawerActiveSessions,
         gatewayLabel = stateHolder.activeGatewayDisplayName(),
         connection = stateHolder.gatewayState.connection,
         deviceIsServer = hosts?.activeProfile?.server == true,
@@ -209,12 +206,9 @@ internal fun DshProductApp(
             hosts?.profiles?.firstOrNull { it.localId == id }?.let { hosts.select(it) }
         },
         onPairNewDevice = { showQrScanner = true },
-        spaces = workspaces,
-        selectedWorkspaceId = stateHolder.selectedWorkspaceId,
-        ungroupedSelected = ungroupedSelected,
         // 账户卡展示产品身份而不是设备名：设备名已在上一行的设备下拉里，
         // 重复显示会让人误以为「账户名 = 设备名」。
-        accountName = "DeepSeek Harness",
+        accountName = "dsh-mobile",
         accountPlan = "标准版",
         accountQuota = appVersionLabel,
         onOpenSession = ::openSession,
@@ -232,7 +226,6 @@ internal fun DshProductApp(
         },
         onRenameSession = stateHolder::renameSession,
         onArchiveSession = stateHolder::archiveSession,
-        onSelectWorkspace = { id -> stateHolder.selectWorkspace(id) },
         onPlugins = { navController.navigate(ROUTE_PLUGINS) }
     ) { openDrawer, canScrollVertically ->
         val tab = currentTab
@@ -479,12 +472,25 @@ private fun DrawerDestinationScreen(title: String, message: String, onBack: () -
     }
 }
 
-/** 二级页面统一顶栏：返回圆钮 + 居中标题。 */
+/**
+ * 页面顶栏的**唯一**实现：返回圆钮 + 居中标题 + 右侧动作区。
+ *
+ * 标题居中、字号统一取 [DshPageTitleFontSize]（18sp）。此前四个一级页面各写各的：
+ * 项目页用本组件的左对齐 18sp、定时任务页手写 Row 用居中 20sp、设置页用 Material
+ * 的 CenterAlignedTopAppBar 居中 17sp——同一个层级三种字号、两种对齐，切 Tab 时
+ * 标题会跳。所有页面都必须走这里，不要再自己拼 Row 或换用 TopAppBar。
+ *
+ * 右侧 [actions] 与左侧返回钮等宽占位，保证标题在**整屏**居中而不是在剩余空间里居中。
+ */
 @Composable
 internal fun DshPageHeader(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    connection: GatewayConnectionState? = null,
+    onOpenDrawer: (() -> Unit)? = null,
+    onTitleClick: (() -> Unit)? = null,
     actions: @Composable () -> Unit = {}
 ) {
     val palette = dshPalette()
@@ -493,42 +499,119 @@ internal fun DshPageHeader(
             .fillMaxWidth()
             .background(palette.canvas)
             .statusBarsPadding()
-            .height(56.dp)
-            .padding(horizontal = 12.dp),
+            .height(DshPageHeaderHeight)
+            .padding(horizontal = DshPageHeaderHorizontalPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        TopBarCircleButton(
-            iconRes = R.drawable.ic_back_chevron,
-            description = "返回",
-            onClick = onBack
-        )
-        Text(
-            text = title,
-            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-            color = palette.textPrimary,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-        )
-        actions()
+        // 左侧按钮：首页是「打开侧边栏」，其余页面是「返回」。
+        // 两者用同一个尺寸 token，页头高度与内容基线因此完全一致。
+        if (onOpenDrawer != null) {
+            DshDrawerButton(
+                onClick = onOpenDrawer,
+                testTag = "brand-drawer-button"
+            )
+        } else {
+            TopBarCircleButton(
+                iconRes = R.drawable.ic_back_chevron,
+                description = "返回",
+                onClick = onBack
+            )
+        }
+        // 标题 + 可选副标题。**两种页面共用同一套行高**：即使没有副标题，
+        // 标题也占据完整的两行区块（副标题位置留空），因此四个页面的标题
+        // 落在同一基线上，切换 Tab 时不会上下跳。
+        // 标题 + 副标题作为**一整块**点击区（首页 → 任务运行设置）。
+        // 保留原来的 testTag 与 contentDescription：读屏用户需要知道「点这里进设置」，
+        // 而测试也依赖该 tag（AndroidUiParityDeviceTest 断言它可见）。
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .then(
+                    if (onTitleClick != null) {
+                        Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(role = Role.Button, onClick = onTitleClick)
+                            .semantics { contentDescription = "任务运行设置" }
+                            .testTag("brand-runtime-settings-button")
+                    } else {
+                        Modifier
+                    }
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = title,
+                color = palette.textPrimary,
+                fontSize = DshPageTitleFontSize,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+            )
+            // 副标题槽位：有内容时显示，无内容时留一个等高占位——
+            // 用 Box 固定高度而不是条件渲染，保证标题的垂直位置在两种页面间一致。
+            Box(
+                modifier = Modifier.height(DshHeaderSubtitleSlotHeight),
+                contentAlignment = Alignment.Center
+            ) {
+                if (subtitle != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (connection != null) {
+                            StatusIndicatorDot(
+                                color = dshConnectionDotColor(connection, palette),
+                                modifier = Modifier.size(7.dp).testTag("header-connection-dot"),
+                                glowing = connection == GatewayConnectionState.CONNECTED
+                            )
+                        }
+                        Text(
+                            text = subtitle,
+                            color = palette.textTertiary,
+                            fontSize = DshHeaderSubtitleFontSize,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                        )
+                        // `›` 紧跟在副标题之后，而不是整行末尾：整块都是点击区，
+                        // 箭头贴着「未分组」才读得出「点这里进设置」。
+                        if (onTitleClick != null) {
+                            Image(
+                                painter = painterResource(R.drawable.ic_chevron_right),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .testTag("header-runtime-settings-chevron"),
+                                colorFilter = ColorFilter.tint(palette.textTertiary)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        // 右侧动作区宽度与左侧按钮一致，标题才是整屏居中。
+        Box(Modifier.size(DshPageHeaderCircleButtonSize), contentAlignment = Alignment.Center) {
+            actions()
+        }
     }
 }
 
 /**
- * 首页正文：品牌头 + 新建任务 + 最近活跃任务列表（撑满剩余高度）。
+ * 首页正文（= 任务列表）：页头固定 + 新建任务 + 任务列表整页滚动。
  *
- * 抽屉与底栏已上移到 [DshProductApp] 的应用外壳（v1.9.0 点 5/6），
- * 本函数只负责「滑动页面」内的内容。`sessions` 由外壳统一投影后传入，
- * 保证首页与抽屉永远来自同一份 `workspaceScopedSessions` 结果。
+ * 页头**不参与滚动**：它和底栏一样是常驻 chrome。此前品牌头是列表的第一个 item，
+ * 会随内容滚出屏幕，滚到下面就没有任何入口能回顶部或开抽屉；
+ * 而列表内嵌滚动时它又是钉住的——同一个页头两种行为，取决于内容多少。
  *
- * 「当前项目」卡已移除：目录名与连接点在品牌头副标题里已有，卡片本身不可点，
- * 占掉的 66dp 只是把首屏真正要看的内容（会话列表）往下推。切换/新增项目走底栏「项目」Tab。
+ * 页头走统一的 [DshPageHeader]：与项目/定时任务/设置**同一高度(56dp)、同一按钮尺寸
+ * (46dp)、同一标题字号(18sp)与同一居中规则**。此前首页用的是另一套品牌头
+ * （无固定高度、47dp 按钮、17–20sp 自适应标题），切页面时页头整体跳动。
  *
- * 会话列表**不截断**并独占剩余高度：列表自身是 LazyColumn，条数超出一屏时在卡片内滚动，
- * 品牌头与「新建任务」保持钉住。此前截断到 6 条，会让「最近活跃」覆盖不到稍早的任务，
- * 而这正是用户最常点进来的入口。
+ * 页头之下是**单一** [LazyColumn]：新建任务与任务列表一起滚出屏幕。
+ * 「最近活跃」分区标题已去掉——整页就是任务列表，不需要一个标题再声明一次。
  */
 @Composable
 private fun WorkspaceScreen(
@@ -549,17 +632,10 @@ private fun WorkspaceScreen(
     // 避免用户点了才看到报错。
     val canStartNewSession = !stateHolder.gatewayState.connection.dshBlocksNetworkActions
 
-    // 列表用 weight(1f) 吃掉品牌头/按钮之后的剩余高度：内容不足一屏时底栏上方
-    // 不会留一块空白，超出时在列表内部滚动。
-    Column(
-        modifier = Modifier.fillMaxSize()
-            .statusBarsPadding()
-            .padding(horizontal = 18.dp)
-            .testTag("workspace-screen")
-    ) {
-        Spacer(Modifier.height(12.dp))
-        DshBrandHeader(
-            title = "DeepSeek Harness",
+    Column(Modifier.fillMaxSize().testTag("workspace-screen")) {
+        DshPageHeader(
+            title = "dsh-mobile",
+            onBack = {},
             subtitle = runtimeHeaderSubtitle(
                 deviceLabel = stateHolder.activeGatewayDisplayName(),
                 workspaceLabel = selectedWorkspace?.title
@@ -567,26 +643,38 @@ private fun WorkspaceScreen(
             ),
             connection = stateHolder.gatewayState.connection,
             onOpenDrawer = openDrawer,
-            onOpenRuntimeSettings = { showRuntimeSettings = true }
+            onTitleClick = { showRuntimeSettings = true }
         )
-        Spacer(Modifier.height(20.dp))
-        DshNewTaskButton(
-            // 与抽屉里的同名按钮保持一致（此前首页叫「新建会话」、抽屉叫
-            // 「新建任务」，同一个动作两个叫法）。
-            label = "新建任务",
-            onClick = onNewSession,
-            enabled = canStartNewSession
-        )
-        Spacer(Modifier.height(22.dp))
-        HomeRecentSessions(
-            allSessions = sessions,
-            connection = stateHolder.gatewayState.connection,
-            onOpenSession = onOpenSession,
-            onRenameSession = stateHolder::renameSession,
-            onArchiveSession = stateHolder::archiveSession,
-            modifier = Modifier.weight(1f),
-            canScrollVertically = canScrollVertically
-        )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = DshScreenHorizontalPadding,
+                end = DshScreenHorizontalPadding,
+                top = DshSectionSpacing,
+                bottom = 24.dp
+            ),
+            // 抽屉横向拖动期间交出滚动权：否则在手势仲裁里和抽屉抢同一次拖动。
+            userScrollEnabled = canScrollVertically
+        ) {
+            item(key = "home-new-task") {
+                DshNewTaskButton(
+                    // 与抽屉里的同名按钮保持一致（此前首页叫「新建会话」、抽屉叫
+                    // 「新建任务」，同一个动作两个叫法）。
+                    label = "新建任务",
+                    onClick = onNewSession,
+                    enabled = canStartNewSession
+                )
+                Spacer(Modifier.height(22.dp))
+            }
+            // 任务列表本身就是这一页：不再有「最近活跃」标题，也没有内嵌滚动容器。
+            taskListItems(
+                allSessions = sessions,
+                connection = stateHolder.gatewayState.connection,
+                onOpenSession = onOpenSession,
+                onRenameSession = stateHolder::renameSession,
+                onArchiveSession = stateHolder::archiveSession
+            )
+        }
     }
 
     if (showRuntimeSettings) {
@@ -657,33 +745,6 @@ internal fun workspaceScopedSessions(
         return sessions.filter { it.isVisibleInHistory && it.id !in assigned }
     }
     return sessions.filter { it.isVisibleInHistory && it.id in selected.sessionIds }
-}
-
-/**
- * 抽屉「活跃」区块的数据投影：**近 24 小时内有活动的任务**，按最近活动倒序。
- *
- * 入参 [scopedSessions] 是不限项目的全量会话（`homeSessions`）——「活跃」区块**跨全部项目**
- * 露出近 24h 任务，方便从其它项目快速切进来。项目过滤只作用于下方「任务」历史区块，
- * 不在这里重复实现（避免再引入一个项目过滤源）。
- * 这里只做 24 小时窗口筛选与排序：
- *  - `lastActivityEpochSeconds` 是网关 / 离线缓存给出的活动时刻（秒）；
- *  - 以当前时刻为界，活动时刻严格大于 `now - 24h` 才算「活跃」；
- *  - `nowMillis` 默认取 `System.currentTimeMillis()`，但单测可注入固定时钟，避免依赖墙上时间。
- *
- * 空输入、或没有任何会话落在窗口内时返回空列表——抽屉据此整段跳过「活跃」区块，
- * 不暴露「活跃 (0)」这类空洞分组。
- *
- * 下界用 `>` 而非 `>=`：恰好满 24 小时前的活动算「一天前」，不计入「近 24 小时」，
- * 避免把一整天前的任务当成刚活跃过。
- */
-internal fun drawerActiveSessions(
-    scopedSessions: List<SessionSummary>,
-    nowMillis: Long = System.currentTimeMillis()
-): List<SessionSummary> {
-    val cutoffSeconds = (nowMillis / 1_000) - 24 * 3_600
-    return scopedSessions
-        .filter { it.lastActivityEpochSeconds > cutoffSeconds && it.isVisibleInHistory }
-        .sortedByDescending(SessionSummary::lastActivityEpochSeconds)
 }
 
 internal fun relativeTime(

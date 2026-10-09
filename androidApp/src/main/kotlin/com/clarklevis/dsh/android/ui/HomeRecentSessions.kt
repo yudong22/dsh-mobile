@@ -7,21 +7,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
@@ -56,123 +52,68 @@ internal fun homeRecentSessions(scopedSessions: List<SessionSummary>): List<Sess
     scopedSessions.sortedByDescending(SessionSummary::lastActivityEpochSeconds)
 
 /**
- * 首页的「最近活跃」区块：标题行（标题 + 连接短标签）与**完整**的会话列表。
+ * 首页任务列表：**整页滚动**的会话列表（不再是嵌套在首页里的独立滚动容器）。
  *
- * [allSessions] 是**已按当前项目过滤**的完整列表，本区块只排序、不再截断。
+ * 首页与「任务列表」原本是两个概念：首页有品牌头 + 新建任务 + 高度受限的内嵌列表，
+ * 内嵌列表自己滚动。结果是同一屏里存在两个滚动容器——品牌头固定不动、列表在中间滚，
+ * 用户要先判断「我该滑哪一块」。现在合并为**一个**整页滚动的 LazyColumn：
+ * 品牌头、新建任务、任务列表都是它的 item / items，一起滚出屏幕。
  *
- * 三种态各有明确文案，不留空白：
- *  - 已连接但当前项目没有任务 → 「当前项目还没有任务…」；
- *  - 连接中且列表为空（尚无离线缓存播种）→ 进度文案，不能说成「没有会话」；
- *  - 未连接但有缓存/历史会话 → 照常展示，标题右侧标成「离线」而不是「已连接」。
+ * 「最近活跃」标题行已去掉：整页就是任务列表本身，不再需要一个分区标题来说明这件事
+ * （连接状态已由品牌头的连接点与副标题表达）。
  *
- * 列表是 [LazyColumn]（会话可以有很多条）并独占 [modifier] 给出的剩余高度：条数不受限，
- * 一屏放得下多少就显示多少，其余在卡片内滚动。卡片面随视口一起撑满，让整块列表读起来
- * 是一个连续的表面，而不是浮在中间的一小条。
- *
- * 会话行复用 [SessionRowActions]，因此首页也能长按重命名 / 归档，不必先开抽屉。
+ * [allSessions] 是**已按当前项目过滤**的完整列表，本区块只排序、不截断。
+ * 列表为空时按连接相位给四档文案，不留空白。
  */
-@Composable
-internal fun HomeRecentSessions(
+internal fun LazyListScope.taskListItems(
     allSessions: List<SessionSummary>,
     connection: GatewayConnectionState,
     onOpenSession: (String) -> Unit,
     onRenameSession: (String, String) -> Unit,
-    onArchiveSession: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    canScrollVertically: Boolean = true
+    onArchiveSession: (String) -> Unit
 ) {
-    val palette = dshPalette()
-    val sessions = remember(allSessions) { homeRecentSessions(allSessions) }
-    Column(modifier = modifier.fillMaxWidth().testTag("home-recent-sessions")) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+    val sessions = homeRecentSessions(allSessions)
+    if (sessions.isEmpty()) {
+        item(key = "home-recent-empty") {
+            HomeRecentEmptyState(connection = connection)
+        }
+        return
+    }
+    itemsIndexed(sessions, key = { _, session -> session.id }) { index, session ->
+        SessionRowActions(
+            session = session,
+            onClick = { onOpenSession(session.id) },
+            onRename = onRenameSession,
+            onArchive = onArchiveSession,
+            contentPadding = HOME_SESSION_ROW_PADDING,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.testTag("home-session-${session.id}")
         ) {
+            SessionActivityDot(session = session)
             Text(
-                text = "最近活跃",
-                color = palette.textPrimary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
+                text = session.title,
+                color = dshPalette().textPrimary,
+                fontSize = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
             Text(
-                text = homeConnectionBadge(connection),
-                color = if (connection == GatewayConnectionState.CONNECTED) {
-                    DshColors.Success
-                } else {
-                    palette.textTertiary
-                },
+                text = if (session.isRunning) "运行中" else relativeTime(session.lastActivityEpochSeconds),
+                color = if (session.isRunning) DshColors.Success else dshPalette().textTertiary,
                 fontSize = 13.sp,
-                modifier = Modifier.testTag("home-recent-status"),
+                maxLines = 1,
+                modifier = Modifier.testTag("home-session-time-${session.id}"),
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
         }
-        Spacer(Modifier.height(10.dp))
-        if (sessions.isEmpty()) {
-            // 空态卡按内容高度收拢而不是撑满：一条提示占满整屏反而更像加载失败。
-            HomeRecentEmptyState(connection = connection)
-        } else {
-            LazyColumn(
-                // weight(1f)：吃掉标题行之后的剩余高度，让列表卡撑满底栏上方的空间。
-                modifier = Modifier.fillMaxWidth().weight(1f)
-                    .background(palette.surface, DshCardCornerRadius)
-                    .border(1.dp, palette.cardBorder, DshCardCornerRadius)
-                    .clip(DshCardCornerRadius)
-                    .testTag("home-session-list"),
-                contentPadding = PaddingValues(bottom = 4.dp),
-                // 抽屉横向拖动期间交出滚动权：否则在手势仲裁里和抽屉抢同一次拖动。
-                userScrollEnabled = canScrollVertically
-            ) {
-                // key = session.id：列表会随最近活动时间重排（一次 turn/end 就能让某行跳顶），
-                // 不设 key 时行内状态（展开的菜单 / 正在重命名的对话框）会留在原索引上，
-                // 于是「正在改 A」会挂到移动过来的 B 上，确认时改错会话且丢掉刚输入的文字。
-                itemsIndexed(sessions, key = { _, session -> session.id }) { index, session ->
-                    SessionRowActions(
-                        session = session,
-                        onClick = { onOpenSession(session.id) },
-                        onRename = onRenameSession,
-                        onArchive = onArchiveSession,
-                        contentPadding = HOME_SESSION_ROW_PADDING,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.testTag("home-session-${session.id}")
-                    ) {
-                        SessionActivityDot(session = session)
-                        Text(
-                            text = session.title,
-                            color = palette.textPrimary,
-                            fontSize = 16.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                            style = TextStyle(
-                                platformStyle = PlatformTextStyle(includeFontPadding = false)
-                            )
-                        )
-                        Text(
-                            text = if (session.isRunning) {
-                                "运行中"
-                            } else {
-                                relativeTime(session.lastActivityEpochSeconds)
-                            },
-                            color = if (session.isRunning) DshColors.Success else palette.textTertiary,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            modifier = Modifier.testTag("home-session-time-${session.id}"),
-                            style = TextStyle(
-                                platformStyle = PlatformTextStyle(includeFontPadding = false)
-                            )
-                        )
-                    }
-                    if (index != sessions.lastIndex) {
-                        Box(
-                            Modifier.fillMaxWidth().padding(start = 14.dp)
-                                .height(1.dp)
-                                .background(palette.divider)
-                        )
-                    }
-                }
-            }
+        if (index != sessions.lastIndex) {
+            Box(
+                Modifier.fillMaxWidth().padding(start = 14.dp)
+                    .height(1.dp)
+                    .background(dshPalette().divider)
+            )
         }
     }
 }

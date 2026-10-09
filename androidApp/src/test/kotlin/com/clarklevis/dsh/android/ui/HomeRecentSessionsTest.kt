@@ -115,62 +115,6 @@ class HomeRecentSessionsTest {
         assertEquals(emptyList<SessionSummary>(), homeRecentSessions(emptyList()))
     }
 
-    /**
-     * 抽屉「活跃」区块只收近 24 小时有活动的任务：落在窗口内的保留、按最近活动倒序；
-     * 更早的与未来时间戳都不算活跃。用固定时钟（nowMillis）避免依赖墙上时间。
-     */
-    @Test
-    fun `active drawer list keeps only last-24h sessions in recent order`() {
-        val now = 1_000_000L // 任意固定秒基，单位毫秒
-        val sessions = listOf(
-            session("twoHoursAgo", at = (now / 1_000) - 2 * 3_600.0),
-            session("fresh", at = (now / 1_000) - 60.0),
-            session("twoDaysAgo", at = (now / 1_000) - 2 * 24 * 3_600.0),
-            session("twoHoursAgoToo", at = (now / 1_000) - 3 * 3_600.0)
-        )
-
-        val active = drawerActiveSessions(sessions, nowMillis = now)
-
-        assertEquals(listOf("fresh", "twoHoursAgo", "twoHoursAgoToo"), active.map { it.id })
-    }
-
-    /** 没有任何会话落在 24 小时窗口内时，活跃区块应整段跳过（返回空列表）。 */
-    @Test
-    fun `active drawer list is empty when nothing happened in the last 24h`() {
-        val now = 1_000_000L
-        val sessions = listOf(
-            session("twoDaysAgo", at = (now / 1_000) - 2 * 24 * 3_600.0),
-            session("aWeekAgo", at = (now / 1_000) - 7 * 24 * 3_600.0)
-        )
-
-        assertTrue(drawerActiveSessions(sessions, nowMillis = now).isEmpty())
-    }
-
-    /** 恰好 24 小时前的活动应被排除：窗口是「近 24 小时以内」，不取等号边界之外。 */
-    @Test
-    fun `active drawer list excludes exactly 24h old activity`() {
-        val now = 1_000_000L
-        val sessions = listOf(
-            session("boundary", at = (now / 1_000) - 24 * 3_600.0),
-            session("inside", at = (now / 1_000) - 23 * 3_600.0)
-        )
-
-        assertEquals(listOf("inside"), drawerActiveSessions(sessions, nowMillis = now).map { it.id })
-    }
-
-    /** 草稿（尚无会话正文）不进历史，也不应出现在活跃区块。 */
-    @Test
-    fun `active drawer list hides draft sessions with no conversation`() {
-        val now = 1_000_000L
-        val draft = session("blank", at = (now / 1_000) - 60.0).copy(hasConversation = false)
-        val real = session("real", at = (now / 1_000) - 60.0)
-
-        assertEquals(
-            listOf("real"),
-            drawerActiveSessions(listOf(draft, real), nowMillis = now).map { it.id }
-        )
-    }
-
     @Test
     fun `connection badge maps every phase to a user visible word`() {
         assertEquals("已连接", homeConnectionBadge(GatewayConnectionState.CONNECTED))

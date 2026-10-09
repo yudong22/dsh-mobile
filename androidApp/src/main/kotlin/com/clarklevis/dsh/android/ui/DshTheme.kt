@@ -54,6 +54,37 @@ internal val DshSectionSpacing = 20.dp
  * 17sp、项目页 15sp、设置页 17sp，视觉密度不一致。
  */
 internal val DshSectionTitleFontSize = 17.sp
+
+/**
+ * 页面顶栏标题字号：**所有页面统一 18sp**。
+ *
+ * 此前四个页头各写一个值——项目 18sp、定时任务 20sp、设置 17sp，同一个层级
+ * （一级页面标题）三种字号，切换 Tab 时标题会明显跳动。顶栏标题与页内区块标题
+ * （[DshSectionTitleFontSize]）是两个层级，不要混用。
+ */
+internal val DshPageTitleFontSize = 18.sp
+
+/**
+ * 页头几何：**所有页面共用**，任何页面都不应再自己写高度或按钮尺寸。
+ *
+ * 此前三种页头各写各的：首页品牌头无固定高度、左侧 47dp 汉堡、标题 17–20sp 自适应；
+ * 二级页 56dp + 46dp 返回钮 + 18sp。切页面时页头会整体跳动。
+ * 这里把「页头内容高度」「左侧圆钮直径」「水平内边距」收敛成一组 token。
+ */
+internal val DshPageHeaderHeight = 56.dp
+internal val DshPageHeaderCircleButtonSize = 46.dp
+internal val DshPageHeaderHorizontalPadding = 12.dp
+
+/** 页头副标题字号（首页的「设备 | 项目」）。固定值，不做自适应降档。 */
+internal val DshHeaderSubtitleFontSize = 12.sp
+
+/**
+ * 页头副标题槽位高度：**所有页面共用**。
+ *
+ * 首页有副标题（设备 | 项目）、其余页面没有。如果按内容条件渲染，标题在两类页面里
+ * 的垂直位置会差一行；固定槽位（无副标题时留空）让标题基线在四个页面完全一致。
+ */
+internal val DshHeaderSubtitleSlotHeight = 16.dp
 internal val DshBodyFontSize = 15.sp
 internal val DshCaptionFontSize = 13.sp
 

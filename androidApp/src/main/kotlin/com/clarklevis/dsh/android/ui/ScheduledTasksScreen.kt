@@ -107,20 +107,14 @@ internal fun ScheduledTasksScreen(
     Column(
         Modifier.fillMaxSize()
             .background(palette.canvas)
-            .statusBarsPadding().navigationBarsPadding()
+            .navigationBarsPadding()
+            .testTag("scheduled-tasks-screen")
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp)
-                .testTag("scheduled-tasks-screen"),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TopBarCircleButton(R.drawable.ic_back_chevron, "返回", onBack)
-            Spacer(Modifier.weight(1f))
-            Text("定时任务", fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
-                color = palette.textPrimary)
-            Spacer(Modifier.weight(1f))
-            // 顶栏右侧原本是 46dp 空占位。这里换成连接相位标签：断网时列表是断网前的
-            // 缓存（stale），没有任何标识会让用户以为看到的是最新状态。
+        // 统一走 DshPageHeader：此前这里手写 Row，标题 20sp 居中，与项目页（18sp 左对齐）
+        // 和设置页（17sp 居中）三套并存。
+        DshPageHeader(title = "定时任务", onBack = onBack) {
+            // 右侧放连接相位标签：断网时列表是断网前的缓存（stale），
+            // 没有任何标识会让用户以为看到的是最新状态。
             Text(
                 text = homeConnectionBadge(connection),
                 color = if (connection == GatewayConnectionState.CONNECTED) {
@@ -129,7 +123,7 @@ internal fun ScheduledTasksScreen(
                     palette.textTertiary
                 },
                 fontSize = 13.sp,
-                modifier = Modifier.testTag("scheduled-tasks-status")
+                modifier = Modifier.padding(end = 8.dp).testTag("scheduled-tasks-status")
             )
         }
         when {
