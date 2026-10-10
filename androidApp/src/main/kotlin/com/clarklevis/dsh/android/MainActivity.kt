@@ -32,7 +32,10 @@ class MainActivity : ComponentActivity() {
 
     private fun consumeNotificationIntent(intent: Intent?) {
         (application as DshAndroidApplication).openNotificationSession(intent)
+        // 两组键都清掉，否则配置变更重建 Activity 时会再次触发同一次跳转。
         intent?.removeExtra(EXTRA_NOTIFICATION_GATEWAY_ID)
         intent?.removeExtra(EXTRA_NOTIFICATION_SESSION_ID)
+        intent?.removeExtra(FCM_DATA_GATEWAY_ID)
+        intent?.removeExtra(FCM_DATA_SESSION_ID)
     }
 }

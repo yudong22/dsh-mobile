@@ -62,11 +62,13 @@ fun DeepSeekHarnessAndroidApp() {
     val hosts = application.hosts
     if (!hosts.ready) return
     val notificationRoute = application.pendingNotificationSession
-    LaunchedEffect(notificationRoute, hosts.activeId) {
-        if (notificationRoute != null && notificationRoute.gatewayId != hosts.activeId) {
-            val profile = hosts.profiles.firstOrNull { it.localId == notificationRoute.gatewayId }
+    LaunchedEffect(notificationRoute, hosts.activeId, hosts.profiles) {
+        val route = notificationRoute ?: return@LaunchedEffect
+        // 主机是否已是当前主机：两种 ID 语义都算命中（本地通知给 localId，FCM 给服务端 ID）。
+        if (!notificationTargetsActiveProfile(hosts.activeProfile, route.gatewayId)) {
+            val profile = profileForNotification(hosts.profiles, route.gatewayId)
             if (profile != null) hosts.select(profile)
-            else application.clearNotificationSession(notificationRoute)
+            else application.clearNotificationSession(route)
         }
     }
     val stateHolder = hosts.activeGraph.stateHolder
@@ -97,7 +99,11 @@ fun DeepSeekHarnessAndroidApp() {
             DshProductApp(
                 stateHolder = stateHolder,
                 onPickImage = { imageOwner.value = stateHolder; imagePicker.launch("image/*") },
-                notificationRoute = notificationRoute?.takeIf { it.gatewayId == hosts.activeId },
+                // 只把「属于当前主机」的路由传给页面。这里必须按两种 ID 都认：本地通知带
+                // localId，远程推送带服务端 gatewayId（见 NotificationRouting）。
+                notificationRoute = notificationRoute?.takeIf {
+                    notificationTargetsActiveProfile(hosts.activeProfile, it.gatewayId)
+                },
                 onNotificationRouteOpened = application::clearNotificationSession
             )
             }

@@ -24,11 +24,14 @@ class DshAndroidApplication : Application(), DefaultLifecycleObserver {
         private set
 
     internal fun openNotificationSession(intent: Intent?) {
-        val gatewayId = intent?.getStringExtra(EXTRA_NOTIFICATION_GATEWAY_ID)?.takeIf(String::isNotBlank)
-        val sessionId = intent?.getStringExtra(EXTRA_NOTIFICATION_SESSION_ID)?.takeIf(String::isNotBlank)
-        if (gatewayId != null && sessionId != null) {
-            pendingNotificationSession = AndroidNotificationSessionRoute(gatewayId, sessionId)
-        }
+        // 两组键都要认：本地通知用命名空间键，FCM 推送用裸键（见 NotificationRouting）。
+        val route = notificationRouteFromExtras(
+            namespacedGatewayId = intent?.getStringExtra(EXTRA_NOTIFICATION_GATEWAY_ID),
+            namespacedSessionId = intent?.getStringExtra(EXTRA_NOTIFICATION_SESSION_ID),
+            fcmGatewayId = intent?.getStringExtra(FCM_DATA_GATEWAY_ID),
+            fcmSessionId = intent?.getStringExtra(FCM_DATA_SESSION_ID),
+        )
+        if (route != null) pendingNotificationSession = route
     }
 
     internal fun clearNotificationSession(route: AndroidNotificationSessionRoute) {
