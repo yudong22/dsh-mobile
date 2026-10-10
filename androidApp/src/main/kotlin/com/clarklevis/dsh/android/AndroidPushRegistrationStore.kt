@@ -3,6 +3,7 @@ package com.clarklevis.dsh.android
 import android.content.Context
 import android.util.Log
 import com.clarklevis.dsh.shared.gateway.GatewayPushRegistration
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -38,6 +39,39 @@ object AndroidPushRegistrationStore {
 
     fun clear(context: Context) {
         prefs(context).edit().remove(KEY_TOKEN).apply()
+    }
+
+    /**
+     * 向 Firebase 主动取一次当前投递地址，成功后落盘并回调。
+     *
+     * 为什么必须主动取：`onNewToken` **只在 token 首次签发或轮换时**回调。而「装上 App
+     * 时 token 早就存在」这条路径不会触发它——重装、清应用数据、换机恢复都会落到这里。
+     * 此前只等回调，于是这些情况下 `dsh.push` 永远不生成、设备从不上报、也就永远收不到
+     * 离线推送（网关面板表现为「平台未知」）。
+     *
+     * Firebase 未初始化时（没有 `google-services.json`，PR CI 与部分自建构建即如此）
+     * `getInstance()` 会抛 `IllegalStateException`；那种构建本就不投递推送，这里安静返回
+     * 而不是让连接流程崩掉。
+     *
+     * @param onToken 已落盘的新地址；失败或不可用时不被调用。
+     */
+    fun fetchAndSave(context: Context, onToken: (GatewayPushRegistration) -> Unit) {
+        val messaging = runCatching { FirebaseMessaging.getInstance() }
+            .onFailure { Log.w(TAG, "Firebase not initialised; push unavailable: ${it.message}") }
+            .getOrNull() ?: return
+        messaging.token
+            .addOnSuccessListener { token ->
+                val registration = pushRegistrationForStoredToken(token)
+                if (registration == null) {
+                    // 空白 token 不落盘：上报它只会被网关拒绝。
+                    Log.w(TAG, "Firebase returned a blank token; not registering")
+                    return@addOnSuccessListener
+                }
+                Log.i(TAG, "fetched FCM token (length=${token.length})")
+                save(context, token)
+                onToken(registration)
+            }
+            .addOnFailureListener(::logFailure)
     }
 
     internal fun recordDelivered(context: Context, dedupeKey: String?) {

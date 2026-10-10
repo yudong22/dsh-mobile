@@ -1,18 +1,15 @@
 package com.clarklevis.dsh.android
 
-import android.Manifest
-import com.clarklevis.dsh.android.ui.AgentNotificationSettings
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
+import com.clarklevis.dsh.android.ui.readNotificationSystemState
 import org.json.JSONArray
 
 internal const val EXTRA_NOTIFICATION_GATEWAY_ID = "com.clarklevis.dsh.android.notification.GATEWAY_ID"
@@ -25,9 +22,6 @@ internal class AndroidAgentNotificationManager(context: Context) {
     private val appContext = context.applicationContext
     private val manager = NotificationManagerCompat.from(appContext)
     private val preferences = appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-    private val notificationPrefs = appContext.getSharedPreferences(
-        AgentNotificationSettings.PREFERENCES_NAME, Context.MODE_PRIVATE
-    )
     private val recentIdentifiers = mutableListOf<String>()
     private val recentIdentifierSet = mutableSetOf<String>()
 
@@ -128,17 +122,13 @@ internal class AndroidAgentNotificationManager(context: Context) {
         body: String,
         icon: Int
     ) {
-        if (!notificationPrefs.getBoolean(AgentNotificationSettings.KEY_NOTIFY_IN_BACKGROUND, true)) return
         if (identifier in recentIdentifierSet) return
         if ((appContext as? DshAndroidApplication)?.isInForeground == true) {
             rememberIdentifier(identifier)
             return
         }
-        if (!manager.areNotificationsEnabled()) return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(appContext, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) return
+        // 能否通知只看系统状态（权限 + 系统开关），不存在 App 侧的第二个开关。
+        if (!readNotificationSystemState(appContext).canNotify) return
 
         val openIntent = PendingIntent.getActivity(
             appContext,

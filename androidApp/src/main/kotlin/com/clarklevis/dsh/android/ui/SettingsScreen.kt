@@ -1,5 +1,6 @@
 package com.clarklevis.dsh.android.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -144,10 +146,10 @@ internal fun SettingsScreen(
                         LanguageSettingsRow()
                     }
                     SettingsSection(
-                        title = "通知",
+                        title = stringResource(R.string.settings_notifications_section),
                         footer = stringResource(R.string.settings_notify_in_background_summary)
                     ) {
-                        NotificationSettingsRow()
+                        NotificationSettingsRow(stateHolder)
                     }
                     // ── 新会话默认配置 ──（需要网关在线；放「通用/通知」之后）
                     SettingsSection(
@@ -759,30 +761,34 @@ internal fun InterfaceStyleSettingsRow() {
     }
 }
 
+/**
+ * 通知行：**只读**显示系统是否允许通知。
+ *
+ * 这里曾是一个 App 自己的开关，它与系统权限是两份互不知晓的状态——用户刚在系统弹窗里
+ * 点了「允许」，App 内仍按落盘旧值显示关闭，看起来就是坏的。现在只有系统这一个真相，
+ * 本行只做镜像；要点亮或关闭都去系统设置，行本身可点即跳转。
+ *
+ * 每次状态变化（含首次进入本页）都重新上报一次，否则网关仍按旧取值决定离线时要不要
+ * 推送。重复上报是幂等的（服务端 `registerPush` 按平台覆盖）。
+ */
 @Composable
-internal fun NotificationSettingsRow() {
-    val notifications = LocalAgentNotificationSettings.current
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = DshSettingsRowMinHeight),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            stringResource(R.string.settings_notify_in_background),
-            color = MaterialTheme.colorScheme.onSurface,
-            fontSize = DshSettingsTitleFontSize
-        )
-        Spacer(Modifier.weight(1f).padding(horizontal = 6.dp))
-        Switch(
-            checked = notifications.notifyInBackground,
-            onCheckedChange = { notifications.updateNotifyInBackground(it) },
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                uncheckedThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                uncheckedTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
-            )
-        )
-    }
+internal fun NotificationSettingsRow(stateHolder: AndroidSharedStateHolder) {
+    val context = LocalContext.current
+    val systemState = rememberNotificationSystemState()
+    LaunchedEffect(systemState) { stateHolder.onNotificationSystemStateMayHaveChanged() }
+    SettingsValueRow(
+        title = stringResource(R.string.settings_notify_in_background),
+        value = stringResource(notificationStateLabelRes(systemState)),
+        onClick = { openAppNotificationSettings(context) }
+    )
+}
+
+/** 系统状态 → 设置页文案资源。返回资源 id 而非字符串，便于在 JVM 测试里断言。 */
+@StringRes
+internal fun notificationStateLabelRes(state: NotificationSystemState): Int = when (state) {
+    NotificationSystemState.ALLOWED -> R.string.settings_notification_allowed
+    NotificationSystemState.PERMISSION_NOT_GRANTED -> R.string.settings_notification_not_granted
+    NotificationSystemState.DISABLED_BY_USER -> R.string.settings_notification_disabled_by_user
 }
 
 @Composable

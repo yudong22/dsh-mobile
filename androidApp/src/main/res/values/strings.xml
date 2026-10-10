@@ -18,6 +18,9 @@
     <string name="agent_question_notification_title">需要你的回答</string>
     <string name="agent_question_notification_body">%1$s：Agent 向你提问\n%2$s</string>
     <string name="settings_notifications_section">通知</string>
-    <string name="settings_notify_in_background">后台时通知我</string>
-    <string name="settings_notify_in_background_summary">App 退到后台后，Agent 提问、需要审批或执行结束时收到通知</string>
+    <string name="settings_notify_in_background">通知</string>
+    <string name="settings_notify_in_background_summary">由系统控制。点按可直接跳转到本应用的通知设置。</string>
+    <string name="settings_notification_allowed">已允许</string>
+    <string name="settings_notification_not_granted">未允许</string>
+    <string name="settings_notification_disabled_by_user">已关闭</string>
 </resources>

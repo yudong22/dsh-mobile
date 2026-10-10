@@ -78,13 +78,17 @@ enum class GatewayPushPlatform(val wireValue: String) {
  * `token` 是设备平台签发的投递地址，网关必须原样保存才能投递，因此它**不能**
  * 沿用配对 `token` 的"只存 SHA-256 摘要、永不落盘明文"规则（见 mobile-gateway
  * `lib/devices.js`）。那条不变量仅适用于配对凭据。
+ *
+ * `notifyInBackground` 是用户在设置里的「后台时通知我」开关：null 表示不上报，
+ * 由网关按默认（开启）处理，供未读取该偏好的调用方使用。
  */
 data class GatewayPushRegistration(
     val platform: GatewayPushPlatform,
-    val token: String
+    val token: String,
+    val notifyInBackground: Boolean? = null
 ) {
     override fun toString(): String =
-        "GatewayPushRegistration(platform=$platform, token=<redacted>)"
+        "GatewayPushRegistration(platform=$platform, token=<redacted>, notifyInBackground=$notifyInBackground)"
 }
 
 data class GatewayRequest(
@@ -152,6 +156,9 @@ object GatewayRequests {
      *
      * 客户端在拿到 `hello` 之后、重连时都要重发一次：网关可能在客户端不知情
      * 的情况下被重装（设备文件随实例走），此时旧 token 已失效。
+     *
+     * `notifyInBackground` 是用户在本机设置里的开关。FCM/APNs 的 `notification`
+     * 载荷由系统直接展示，App 无法在本地拦截，因此这个偏好必须交给网关执行。
      */
     fun registerPush(registration: GatewayPushRegistration): GatewayRequest = request(
         "push-register", "push-registered",
@@ -159,6 +166,7 @@ object GatewayRequests {
     ) {
         put("platform", registration.platform.wireValue)
         put("token", registration.token)
+        registration.notifyInBackground?.let { put("notifyInBackground", it) }
     }
 
     /**

@@ -77,7 +77,11 @@ fun DeepSeekHarnessAndroidApp() {
     }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { }
+    ) { granted ->
+        // 回调此前是空的，于是用户刚点「允许」App 也毫不知情。现在只要结果带来变化就
+        // 重新上报，让网关按新状态决定离线时要不要推送。
+        if (granted) stateHolder.onNotificationSystemStateMayHaveChanged()
+    }
     LaunchedEffect(Unit) {
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&

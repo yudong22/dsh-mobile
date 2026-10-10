@@ -25,6 +25,7 @@ import com.clarklevis.dsh.shared.facade.SharedSlashCommandStore
 import com.clarklevis.dsh.shared.facade.SharedSlashCommandTransition
 import com.clarklevis.dsh.shared.facade.SharedWorkspaceFileStore
 import com.clarklevis.dsh.shared.facade.SharedWorkspaceFileTransition
+import com.clarklevis.dsh.android.ui.readNotificationSystemState
 import com.clarklevis.dsh.shared.gateway.GatewayConnectionState
 import com.clarklevis.dsh.shared.gateway.GatewayPairingPayloadException
 import com.clarklevis.dsh.shared.gateway.GatewayRuntimeEvent
@@ -1281,27 +1282,64 @@ class AndroidSharedStateHolder(
      *
      * 通道未就绪时直接返回而不排队：地址已落盘在 [AndroidPushRegistrationStore]，
      * 连接建立后由 [resendPushRegistration] 重发。
+     *
+     * 这里统一盖上系统是否允许通知的当前值。所有上报路径都经过本方法，因此只有这一个
+     * 出口，不会出现某条路径漏带——那会让用户在系统里关掉通知后仍然收到推送。
      */
     fun submitPushRegistration(registration: com.clarklevis.dsh.shared.gateway.GatewayPushRegistration) {
         val appGraph = graph ?: return
         if (gatewayState.connection != GatewayConnectionState.CONNECTED) return
+        val withPreference = registration.copy(notifyInBackground = canNotifyInBackground(appGraph))
         appGraph.gatewayScope.launch {
-            appGraph.gatewayRuntime.sendRequest(GatewayRequests.registerPush(registration))
+            appGraph.gatewayRuntime.sendRequest(GatewayRequests.registerPush(withPreference))
         }
+    }
+
+    /**
+     * 系统是否允许通知。
+     *
+     * 取自系统状态而非 App 自己的偏好：App 侧那份开关已删除（见
+     * [com.clarklevis.dsh.android.ui.NotificationSystemState]）。FCM/APNs 的
+     * `notification` 载荷由系统展示，App 拦不到，所以只有系统状态能决定这件事。
+     */
+    private fun canNotifyInBackground(appGraph: AndroidAppGraph): Boolean =
+        readNotificationSystemState(appGraph.application.applicationContext).canNotify
+
+    /**
+     * 从系统设置返回后重新上报，让网关拿到最新的系统通知状态。
+     *
+     * 用户可能刚在系统设置里改了通知开关；未连接时什么都不做，落盘地址会在下次连上时
+     * 带上最新取值重新上报。
+     */
+    fun onNotificationSystemStateMayHaveChanged() {
+        resendPushRegistration()
     }
 
     /**
      * 连接建立后补报本机投递地址。
      *
-     * token 可能在离线期间签发（`onNewToken`），或���报时通道尚未就绪而被丢弃——两种
+     * token 可能在离线期间签发（`onNewToken`），或上报时通道尚未就绪而被丢弃——两种
      * 情况都只剩落盘值，因此每次连上都要补报。服务端 `registerPush` 按平台覆盖，
      * 重复上报是幂等的。
+     *
+     * 落盘值可能**根本不存在**：`onNewToken` 只在 token 首次签发或轮换时回调，
+     * 而「装上 App 时 token 早就存在」这条路径（重装、清数据、换机后恢复）不会触发它。
+     * 此时向 Firebase 主动取一次当前 token，否则设备永远不上报、也永远收不到推送。
      */
     fun resendPushRegistration() {
         val appGraph = graph ?: return
-        val registration = AndroidPushRegistrationStore.current(appGraph.application.applicationContext)
-            ?: return
-        submitPushRegistration(registration)
+        val context = appGraph.application.applicationContext
+        val stored = AndroidPushRegistrationStore.current(context)
+        if (stored != null) {
+            submitPushRegistration(stored)
+            return
+        }
+        // 没有落盘值：主动取一次（异步），成功后再落盘并上报。
+        AndroidPushRegistrationStore.fetchAndSave(context) { registration ->
+            if (gatewayState.connection == GatewayConnectionState.CONNECTED) {
+                submitPushRegistration(registration)
+            }
+        }
     }
 
     fun pingGateway() {

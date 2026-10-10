@@ -66,4 +66,43 @@ class GatewayPushProtocolTest {
         val request = GatewayRequests.registerPush(GatewayPushRegistration(GatewayPushPlatform.FCM, "t"))
         assertEquals(null, request.targetSessionId)
     }
+
+    // --- the client's "notify me in the background" switch -------------------
+    //
+    // FCM/APNs `notification` payloads are rendered by the OS, so the app cannot
+    // filter them locally; the value has to travel to the gateway.
+
+    @Test fun registerCarriesTheBackgroundNotificationPreference() {
+        val off = GatewayRequests.registerPush(
+            GatewayPushRegistration(GatewayPushPlatform.FCM, "fcm-token", notifyInBackground = false)
+        )
+        assertEquals(false, payload(off)["notifyInBackground"]!!.jsonPrimitive.content.toBoolean())
+
+        val on = GatewayRequests.registerPush(
+            GatewayPushRegistration(GatewayPushPlatform.FCM, "fcm-token", notifyInBackground = true)
+        )
+        assertEquals(true, payload(on)["notifyInBackground"]!!.jsonPrimitive.content.toBoolean())
+    }
+
+    @Test fun registerOmitsThePreferenceWhenItIsUnknown() {
+        // A caller that does not know the preference must not send `false`, which
+        // would mute the device; omitting it lets the gateway apply its default.
+        val request = GatewayRequests.registerPush(GatewayPushRegistration(GatewayPushPlatform.FCM, "fcm-token"))
+        assertFalse(payload(request).containsKey("notifyInBackground"))
+    }
+
+    @Test fun unregisterDoesNotCarryThePreference() {
+        // Unregister matches on platform+token; a preference field would be noise.
+        val request = GatewayRequests.unregisterPush(
+            GatewayPushRegistration(GatewayPushPlatform.APNS, "d".repeat(64), notifyInBackground = false)
+        )
+        assertFalse(payload(request).containsKey("notifyInBackground"))
+    }
+
+    @Test fun thePreferenceIsStillRedactedFromLogs() {
+        // Adding a field must not undo the token redaction.
+        val rendered = GatewayPushRegistration(GatewayPushPlatform.FCM, "e".repeat(64), notifyInBackground = false).toString()
+        assertFalse(rendered.contains("e".repeat(64)))
+        assertTrue(rendered.contains("notifyInBackground=false"))
+    }
 }

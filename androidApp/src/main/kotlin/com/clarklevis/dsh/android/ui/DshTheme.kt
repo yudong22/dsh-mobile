@@ -394,7 +394,6 @@ private fun paletteColorScheme(palette: DshPalette): ColorScheme {
 @Composable
 internal fun DshTheme(
     appearance: AppearanceSettings = rememberAppearanceSettings(),
-    notifications: AgentNotificationSettings = rememberAgentNotificationSettings(),
     content: @Composable () -> Unit
 ) {
     val view = LocalView.current
@@ -419,7 +418,6 @@ internal fun DshTheme(
     val palette = if (dark) DshPalettes.Dark else DshPalettes.Light
     CompositionLocalProvider(
         LocalAppearanceSettings provides appearance,
-        LocalAgentNotificationSettings provides notifications,
         LocalDshPalette provides palette,
         LocalConfiguration provides configuration
     ) {
