@@ -28,8 +28,10 @@ class GatewayMessagingService : FirebaseMessagingService() {
         if (token.isBlank()) return
         Log.i(TAG, "FCM token rotated")
         // 按平台保存单个地址，token 轮换后旧地址会静默失效，必须立即重报。
+        // 通道未就绪时 `submitPushRegistration` 会丢弃这次请求，但地址已落盘，
+        // 连接建立后由 `AndroidSharedStateHolder` 重发。
         AndroidPushRegistrationStore.save(applicationContext, token)
-        AndroidPushRegistrationStore.consume()?.let { registration ->
+        AndroidPushRegistrationStore.current(applicationContext)?.let { registration ->
             scope.launch { AndroidPushRegistrationBus.submit(registration) }
         }
     }

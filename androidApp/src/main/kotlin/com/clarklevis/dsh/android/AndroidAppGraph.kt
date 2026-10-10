@@ -86,8 +86,8 @@ class AndroidAppGraph(
     }
 
     init {
-        // 进程启动时补报：FCM token 在上次运行已落盘，而通道此刻可能仍未建立。
-        AndroidPushRegistrationStore.restoreFromDisk(application)
+        // 收到系统签发/轮换的 token 时提交上报。落盘值本身不在这里预加载：连接建立后
+        // 由 `AndroidSharedStateHolder` 直接读盘补报，进程重启无需额外的内存状态。
         gatewayScope.launch {
             AndroidPushRegistrationBus.registrations.collect { registration ->
                 stateHolder.submitPushRegistration(registration)

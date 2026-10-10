@@ -8,39 +8,36 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
 /**
- * 持有待上报的 FCM 投递地址，并把注册/注销请求交给已就绪的网关通道。
+ * 持有本机 FCM 投递地址，供网关通道就绪时上报。
  *
- * 与 iOS 的 `AgentPushRegistrationManager` 对称：token 由系统异步签发，而网关通道
- * 可能尚未建立，因此 token 先落盘，等 `hello` 之后由通道消费。
+ * token 由系统异步签发，而网关通道可能尚未建立，因此落盘保存、连接建立后重发。
+ * 与 iOS 的 `AgentPushRegistrationManager` 对称。
  */
 object AndroidPushRegistrationStore {
     private const val TAG = "PushRegistration"
     private const val PREFS = "dsh.push"
     private const val KEY_TOKEN = "fcm.token"
 
-    private var pending: GatewayPushRegistration? = null
-
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun save(context: Context, token: String) {
         prefs(context).edit().putString(KEY_TOKEN, token).apply()
-        pending = fcmRegistration(token)
     }
 
-    /** 取走并清空待上报注册；通道未就绪时返回 null 等待下一次触发。 */
-    fun consume(): GatewayPushRegistration? = pending.also { pending = null }
-
-    /** 通道就绪后从落盘值重新排队，用于进程重启后的补报。 */
-    fun restoreFromDisk(context: Context) {
-        val token = prefs(context).getString(KEY_TOKEN, null) ?: return
-        if (token.isBlank()) return
-        pending = fcmRegistration(token)
-    }
+    /**
+     * 读本机当前的投递地址；**不消费**，可重复读取。
+     *
+     * 落盘值是唯一真相来源。此前用内存 `pending` + `consume()` 保存待上报值，一旦
+     * 通道未就绪就把它清空，而 `onNewToken` 之外没有任何地方再取用它，于是该 token
+     * 永远不会上报——这是安卓端注册始终为空的原因。改为幂等读取后，注册失败与断线
+     * 重连都能自然重发；服务端 `registerPush` 按平台覆盖，重复上报是幂等的。
+     */
+    fun current(context: Context): GatewayPushRegistration? =
+        pushRegistrationForStoredToken(prefs(context).getString(KEY_TOKEN, null))
 
     fun clear(context: Context) {
         prefs(context).edit().remove(KEY_TOKEN).apply()
-        pending = null
     }
 
     internal fun recordDelivered(context: Context, dedupeKey: String?) {
@@ -53,6 +50,16 @@ object AndroidPushRegistrationStore {
         Log.w(TAG, "push registration failed: ${throwable.message}")
     }
 }
+
+/**
+ * 落盘 token → 待上报注册。
+ *
+ * 纯函数，便于在没有 Android 运行时的情况下测试「空白 token 不上报」这一约定。
+ * 空白 token 必须返回 null：上报空地址会让网关侧 `normalizePushRegistration` 拒绝，
+ * 或在更坏的情况下占用该平台的单槽位。
+ */
+internal fun pushRegistrationForStoredToken(token: String?): GatewayPushRegistration? =
+    token?.takeIf { it.isNotBlank() }?.let { fcmRegistration(it) }
 
 /** 通道与注册之间的单向通道：注册方订阅，已就绪的网关运行时收集。 */
 object AndroidPushRegistrationBus {

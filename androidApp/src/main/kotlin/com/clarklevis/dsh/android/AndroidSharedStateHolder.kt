@@ -312,9 +312,11 @@ class AndroidSharedStateHolder(
                         appGraph.diagnostics.runtimeState(state)
                         var shouldCatchUpSelectedHistory = false
                         var sessionIdToRefresh: String? = null
+                        var didConnect = false
                         withContext(Dispatchers.Main.immediate) {
                             val didReconnect = state.connection == GatewayConnectionState.CONNECTED &&
                                 lastObservedConnection != GatewayConnectionState.CONNECTED
+                            didConnect = didReconnect
                             gatewayState = state
                             if (didReconnect) queueState = queueStore.resetConnection()
                             if (state.connection != GatewayConnectionState.CONNECTED) {
@@ -344,6 +346,12 @@ class AndroidSharedStateHolder(
                             lastObservedConnection = state.connection
                         }
                         if (state.connection != GatewayConnectionState.CONNECTED) projectionActor.disconnected()
+                        // 每次连上都补报一次投递地址：token 可能在离线期间签发，或上报时
+                        // 通道尚未就绪。仅在网关通告 push-notifications 时才发，避免对未
+                        // 启用推送的网关做无谓往返。
+                        if (didConnect && "push-notifications" in state.capabilities) {
+                            resendPushRegistration()
+                        }
                         // 订阅只补发重连后的实时事件。重新拉取 latest history，按 seq 与
                         // 本地 live tail 合并，补齐应用在后台断线期间由其他端发送的用户消息。
                         if (shouldCatchUpSelectedHistory) {
@@ -1271,8 +1279,8 @@ class AndroidSharedStateHolder(
     /**
      * 上报本机的 FCM 投递地址。
      *
-     * 通道就绪时调用：`onNewToken` 可能早于任何一次连接，此时 token 已在
-     * [AndroidPushRegistrationStore] 落盘，等待这里消费。
+     * 通道未就绪时直接返回而不排队：地址已落盘在 [AndroidPushRegistrationStore]，
+     * 连接建立后由 [resendPushRegistration] 重发。
      */
     fun submitPushRegistration(registration: com.clarklevis.dsh.shared.gateway.GatewayPushRegistration) {
         val appGraph = graph ?: return
@@ -1280,6 +1288,20 @@ class AndroidSharedStateHolder(
         appGraph.gatewayScope.launch {
             appGraph.gatewayRuntime.sendRequest(GatewayRequests.registerPush(registration))
         }
+    }
+
+    /**
+     * 连接建立后补报本机投递地址。
+     *
+     * token 可能在离线期间签发（`onNewToken`），或���报时通道尚未就绪而被丢弃——两种
+     * 情况都只剩落盘值，因此每次连上都要补报。服务端 `registerPush` 按平台覆盖，
+     * 重复上报是幂等的。
+     */
+    fun resendPushRegistration() {
+        val appGraph = graph ?: return
+        val registration = AndroidPushRegistrationStore.current(appGraph.application.applicationContext)
+            ?: return
+        submitPushRegistration(registration)
     }
 
     fun pingGateway() {
