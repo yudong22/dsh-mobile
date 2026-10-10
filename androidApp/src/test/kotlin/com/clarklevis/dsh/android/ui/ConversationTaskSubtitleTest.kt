@@ -91,4 +91,118 @@ class ConversationTaskSubtitleTest {
             )
         }
     }
+
+    // ---- 运行中：不得写「暂无任务」（用户反馈）----
+
+    /**
+     * **运行中且没有清单时，绝不能写「暂无任务」。**
+     *
+     * harness 的 `todos` 是「常驻计划」折叠——每轮 `turn/start` 都会清空它
+     * （`packages/todo/tool-todo/src/index.ts:119-133`）。所以「列表为空」在运行中
+     * 是**正常状态**，而 Agent 恰恰正在干活。写「暂无任务」会与事实相反。
+     */
+    @Test
+    fun `running without tasks never claims there is no work`() {
+        val subtitle = conversationTaskSubtitle(tasks = null, isRunning = true)
+
+        assertEquals(RUNNING_SUBTITLE, subtitle)
+        assertTrue(
+            "运行中不得写「暂无任务」，那与「正在干活」矛盾：$subtitle",
+            !subtitle.contains(NO_TASK_SUBTITLE)
+        )
+    }
+
+    /** 空列表与 null 同义（都是「被 turn/start 清掉」），运行中一视同仁。 */
+    @Test
+    fun `running with an empty list also reports running`() {
+        assertEquals(RUNNING_SUBTITLE, conversationTaskSubtitle(emptyList(), isRunning = true))
+    }
+
+    /** 空闲时才用「暂无任务」占位，保持页头行高稳定。 */
+    @Test
+    fun `idle without tasks keeps the placeholder`() {
+        assertEquals(NO_TASK_SUBTITLE, conversationTaskSubtitle(null, isRunning = false))
+        assertEquals(NO_TASK_SUBTITLE, conversationTaskSubtitle(emptyList(), isRunning = false))
+    }
+
+    // ---- 运行中：总结上一轮（用户提出的诉求）----
+
+    /**
+     * 运行中且拿得到**上一轮**清单时，总结它并标明「上一轮」。
+     *
+     * 用户的原话是「之前的任务也可以总结一下」：本轮刚 `turn/start` 清空了 `todos`，
+     * 但上一轮做过什么仍然有价值，且数据确实存在（历史保留了每个 `todo/write` 快照）。
+     */
+    @Test
+    fun `running summarizes the previous round when available`() {
+        val previous = listOf(task("completed"), task("completed"), task("in_progress"))
+
+        val subtitle = conversationTaskSubtitle(tasks = null, isRunning = true, recentTasks = previous)
+
+        assertEquals("3 个任务 · 1 进行中 · 2 已完成（上一轮）", subtitle)
+    }
+
+    /** 「上一轮」是必须的限定语：否则用户会把它当成本轮的进度。 */
+    @Test
+    fun `previous round summary is explicitly labelled`() {
+        val subtitle = conversationTaskSubtitle(
+            tasks = null,
+            isRunning = true,
+            recentTasks = listOf(task("completed"))
+        )
+
+        assertTrue("必须标明这是上一轮，避免与本轮进度混淆：$subtitle", subtitle.contains("上一轮"))
+    }
+
+    /** 上一轮清单为空时不加「（上一轮）」，回落「运行中」。 */
+    @Test
+    fun `empty previous round falls back to running`() {
+        assertEquals(
+            RUNNING_SUBTITLE,
+            conversationTaskSubtitle(tasks = null, isRunning = true, recentTasks = emptyList())
+        )
+    }
+
+    /**
+     * 本轮**已有**清单时直接用它，不显示「上一轮」。
+     *
+     * 否则同一页面上会出现两套数字（本轮清单 + 上一轮总结），用户无法判断哪个是当前进度。
+     */
+    @Test
+    fun `current round list wins over the previous round`() {
+        val subtitle = conversationTaskSubtitle(
+            tasks = listOf(task("in_progress")),
+            isRunning = true,
+            recentTasks = listOf(task("completed"), task("completed"))
+        )
+
+        assertEquals("1 个任务 · 1 进行中", subtitle)
+        assertTrue("本轮有清单时不应再出现上一轮：$subtitle", !subtitle.contains("上一轮"))
+    }
+
+    /** 空闲时即使有「上一轮」清单也不用它——那是历史，不该占据当前状态位。 */
+    @Test
+    fun `idle ignores the previous round list`() {
+        assertEquals(
+            NO_TASK_SUBTITLE,
+            conversationTaskSubtitle(tasks = null, isRunning = false, recentTasks = listOf(task("completed")))
+        )
+    }
+
+    /** 无论输入组合如何，副标题都非空——页头高度不应随之跳动。 */
+    @Test
+    fun `subtitle stays non blank for every combination`() {
+        val lists = listOf<List<GatewayTask>?>(null, emptyList(), listOf(task("in_progress")), listOf(task("completed")))
+        lists.forEach { current ->
+            lists.forEach { previous ->
+                listOf(true, false).forEach { running ->
+                    val subtitle = conversationTaskSubtitle(current, running, previous)
+                    assertTrue(
+                        "副标题不得为空：current=$current running=$running previous=$previous",
+                        subtitle.isNotBlank()
+                    )
+                }
+            }
+        }
+    }
 }

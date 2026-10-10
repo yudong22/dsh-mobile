@@ -291,6 +291,103 @@ class SharedMobileStoreTest {
     }
 
     /**
+     * 空清单**不清空**「上一轮」的记忆。
+     *
+     * harness 的 `todos` 是「常驻计划」折叠：每轮 `turn/start` 都发一次空清单
+     * （`packages/todo/tool-todo/src/index.ts:119-133`）。如果空清单把记忆一起抹掉，
+     * 页头副标题在运行中就会退回「暂无任务」——正是用户反馈的问题。
+     */
+    @Test
+    fun recentTasksSurviveTheEmptyListThatTurnStartPushes() {
+        val store = SharedMobileStore()
+        store.selectSession("s1")
+
+        store.acceptFrame(
+            """{"kind":"tasks","sessionId":"s1","asOfSeq":12,"todos":[{"content":"检查 SDK","status":"completed"},{"content":"构建 APK","status":"in_progress"}]}"""
+        )
+        // 本轮有清单时不必回看上一轮。
+        assertNull(store.snapshot().recentTasks)
+
+        // 新一轮 turn/start：清单被清空。
+        val snapshot = store.acceptFrame(
+            """{"kind":"tasks-updated","sessionId":"s1","asOfSeq":20,"todos":[]}"""
+        )
+
+        assertTrue(snapshot.taskSnapshot?.tasks.isNullOrEmpty())
+        assertEquals(
+            listOf("检查 SDK", "构建 APK"),
+            snapshot.recentTasks?.map { it.content }
+        )
+    }
+
+    /** 后到的非空清单会更新「上一轮」记忆（取最新一次规划）。 */
+    @Test
+    fun recentTasksTrackTheLatestNonEmptyList() {
+        val store = SharedMobileStore()
+        store.selectSession("s1")
+
+        store.acceptFrame("""{"kind":"tasks","sessionId":"s1","asOfSeq":1,"todos":[{"content":"旧任务","status":"completed"}]}""")
+        store.acceptFrame("""{"kind":"tasks-updated","sessionId":"s1","asOfSeq":2,"todos":[{"content":"新任务","status":"in_progress"}]}""")
+        val snapshot = store.acceptFrame("""{"kind":"tasks-updated","sessionId":"s1","asOfSeq":3,"todos":[]}""")
+
+        assertEquals(listOf("新任务"), snapshot.recentTasks?.map { it.content })
+    }
+
+    /** 过期（asOfSeq 更小）的空清单不得覆盖记忆。 */
+    @Test
+    fun staleEmptySnapshotDoesNotOverwriteRecentTasks() {
+        val store = SharedMobileStore()
+        store.selectSession("s1")
+
+        store.acceptFrame("""{"kind":"tasks","sessionId":"s1","asOfSeq":10,"todos":[{"content":"清单","status":"completed"}]}""")
+        store.acceptFrame("""{"kind":"tasks-updated","sessionId":"s1","asOfSeq":5,"todos":[]}""")
+
+        // 水位仍是 10，快照未被空清单替换。
+        val snapshot = store.snapshot()
+        assertEquals("清单", snapshot.taskSnapshot?.tasks?.single()?.content)
+        assertNull(snapshot.recentTasks)
+    }
+
+    /** 「上一轮」按会话隔离，不能串台。 */
+    @Test
+    fun recentTasksAreScopedPerSession() {
+        val store = SharedMobileStore()
+        store.selectSession("s1")
+        store.acceptFrame("""{"kind":"tasks","sessionId":"s1","asOfSeq":1,"todos":[{"content":"s1 任务","status":"completed"}]}""")
+
+        store.selectSession("s2")
+        val snapshot = store.acceptFrame("""{"kind":"tasks-updated","sessionId":"s2","asOfSeq":1,"todos":[]}""")
+
+        assertNull(snapshot.recentTasks, "s2 没有历史，不得读到 s1 的清单")
+    }
+
+    /** 投影基线里的非空清单同样记入「上一轮」（重连场景）。 */
+    @Test
+    fun projectionBaselineFeedsRecentTasks() {
+        val store = SharedMobileStore()
+        store.selectSession("s1")
+
+        store.acceptFrame(
+            """{"kind":"projection-baseline","projections":{"s1":{"asOfSeq":9,"values":{"todos":[{"content":"基线任务","status":"pending"}]}}}}"""
+        )
+        val snapshot = store.acceptFrame("""{"kind":"tasks-updated","sessionId":"s1","asOfSeq":10,"todos":[]}""")
+
+        assertEquals(listOf("基线任务"), snapshot.recentTasks?.map { it.content })
+    }
+
+    /** 重连/重置后不得残留上一连接的记忆。 */
+    @Test
+    fun resetClearsRecentTasks() {
+        val store = SharedMobileStore()
+        store.selectSession("s1")
+        store.acceptFrame("""{"kind":"tasks","sessionId":"s1","asOfSeq":1,"todos":[{"content":"任务","status":"completed"}]}""")
+
+        val snapshot = store.reset()
+
+        assertNull(snapshot.recentTasks)
+    }
+
+    /**
      * 工作区映射必须能落盘并播种（v1.8.3 遗留项）：否则冷启动/离线时
      * `availableWorkspaces` 为空，所有会话被判为「未归属」——那是**错误分组**
      * 而不是空列表，用户很容易当真。

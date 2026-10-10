@@ -242,7 +242,16 @@ internal fun ConversationScreen(
                 // 此前副标题槽位始终空着——页头为此**永久预留了 16dp 高度**
                 // （DshPageHeader 的 subtitle slot），却什么也不显示。
                 // 数据源与输入框上方的任务面板同源（taskSnapshot）。
-                subtitle = conversationTaskSubtitle(stateHolder.snapshot.taskSnapshot?.tasks),
+                //
+                // 运行中传入 isRunning + recentTasks：harness 每轮 `turn/start` 会清空
+                // `todos`，此时不能写「暂无任务」（详见 conversationTaskSubtitle 的注释）。
+                subtitle = conversationTaskSubtitle(
+                    tasks = stateHolder.snapshot.taskSnapshot?.tasks,
+                    isRunning = stateHolder.snapshot.sessions
+                        .firstOrNull { it.id == stateHolder.snapshot.selectedSessionId }
+                        ?.isRunning == true,
+                    recentTasks = stateHolder.snapshot.recentTasks
+                ),
                 onOpenDrawer = LocalDrawerOpener.current,
                 actions = {
                     // 右侧只剩「更多」；ConversationMoreMenu 自带 40dp 圆钮。
@@ -3137,13 +3146,39 @@ private fun permissionIcon(value: String?): Int = when (value) {
  * 两者都会让副标题整行空掉——用户看到的现象就是「副标题有时候没了」，
  * 而且页头在「有/无任务」之间来回切换时视觉重量会跳。
  *
- * 因此统一给固定占位「[NO_TASK_SUBTITLE]」，既保持行高稳定，也如实表达
- * 「当前没有任务」，而不是留白让用户以为界面坏了。
+ * **运行中不得写「暂无任务」**（用户反馈）：harness 的 `todos` 是「常驻计划」折叠，
+ * **每轮 `turn/start` 都会清空它**（`packages/todo/tool-todo/src/index.ts:119-133`）。
+ * 所以会话正在跑、而本轮还没重新 `todo_write` 时，`tasks` 合法地为 null——这并
+ * 不代表「没有任务」，恰恰相反，Agent 正在干活。此时：
+ *  - 若拿得到**上一轮**的清单（[recentTasks]），就总结它，让用户看到「刚做完了什么」；
+ *  - 否则写「运行中」，而不是「暂无任务」。
+ *
+ * 空闲时沿用「暂无任务」占位，既保持行高稳定，也如实表达「当前没有任务」。
  */
 internal const val NO_TASK_SUBTITLE = "暂无任务"
 
-internal fun conversationTaskSubtitle(tasks: List<GatewayTask>?): String {
-    if (tasks.isNullOrEmpty()) return NO_TASK_SUBTITLE
+/** 运行中且没有可总结的清单时的副标题。不能写「暂无任务」——那与「正在干活」矛盾。 */
+internal const val RUNNING_SUBTITLE = "运行中"
+
+internal fun conversationTaskSubtitle(
+    tasks: List<GatewayTask>?,
+    isRunning: Boolean = false,
+    recentTasks: List<GatewayTask>? = null
+): String {
+    if (tasks.isNullOrEmpty()) {
+        // 运行中：优先总结上一轮，否则如实说「运行中」。
+        if (isRunning) {
+            return recentTasks?.takeIf(List<*>::isNotEmpty)?.let { previous ->
+                "${formatTaskCounts(previous)}（上一轮）"
+            } ?: RUNNING_SUBTITLE
+        }
+        return NO_TASK_SUBTITLE
+    }
+    return formatTaskCounts(tasks)
+}
+
+/** 「3 个任务 · 1 进行中 · 2 待处理」，与任务面板同一口径。 */
+private fun formatTaskCounts(tasks: List<GatewayTask>): String {
     val completed = tasks.count { it.status == "completed" }
     val active = tasks.count { it.status == "in_progress" }
     val pending = tasks.size - completed - active

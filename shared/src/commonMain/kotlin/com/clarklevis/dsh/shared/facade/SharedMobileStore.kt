@@ -120,6 +120,13 @@ data class SharedMobileSnapshot(
     val contextSnapshot: GatewayContextSnapshot? = null,
     val statsSnapshot: GatewaySessionStatsSnapshot? = null,
     val taskSnapshot: GatewayTaskSnapshot? = null,
+    /**
+     * 最近一次**非空**的待办清单（见 store 内 `lastNonEmptyTasksBySession` 的说明）。
+     *
+     * 与 [taskSnapshot] 的区别：后者是 harness 的「常驻计划」，每轮 `turn/start` 清空；
+     * 这个保留上一轮的清单，供页头副标题在「运行中但本轮尚未重新规划」时给出诚实总结。
+     */
+    val recentTasks: List<GatewayTask>? = null,
     val goalSnapshot: GatewayGoalProjection? = null,
     val hostSnapshot: GatewayHostSnapshot? = null,
     val selectedHistoryHasMore: Boolean = false,
@@ -191,6 +198,16 @@ class SharedMobileStore(
     private var contextSnapshot: GatewayContextSnapshot? = null
     private var statsSnapshot: GatewaySessionStatsSnapshot? = null
     private val tasksBySession = mutableMapOf<String, GatewayTaskSnapshot>()
+    /**
+     * 每会话**最近一次非空**的待办清单。
+     *
+     * 为什么需要单独记一份：harness 的 `todos` 投影是「常驻计划」折叠——**每轮
+     * `turn/start` 都会把它清空**（`packages/todo/tool-todo/src/index.ts:119-133`，
+     * `turn/end` 才保留已完成的清单）。于是会话运行中、且本轮还没重新 `todo_write` 时，
+     * `todos` 合法地为 null。此时把它读成「没有任务」是**错的**：上一轮的任务还在，
+     * 当前也正在干活。页头副标题因此需要拿这份「上一轮」给出诚实总结。
+     */
+    private val lastNonEmptyTasksBySession = mutableMapOf<String, List<GatewayTask>>()
     private val goalsBySession = mutableMapOf<String, GatewayGoalProjection>()
     private var hostSnapshot: GatewayHostSnapshot? = null
     private var lastFrameKind: String? = null
@@ -331,6 +348,7 @@ class SharedMobileStore(
             when (frame.kind) {
                 "projection-baseline" -> {
                     tasksBySession.clear()
+                    lastNonEmptyTasksBySession.clear()
                     goalsBySession.clear()
                     frame.projections?.objectValue.orEmpty().forEach { (id, projection) ->
                         installTaskGoalProjection(id, projection)
@@ -452,6 +470,11 @@ class SharedMobileStore(
                     val existing = tasksBySession[sessionId]
                     if (existing == null || projectionIsNotOlder(candidate.asOfSeq, existing.asOfSeq)) {
                         tasksBySession[sessionId] = candidate
+                        // 只记非空清单：空清单正是「被 turn/start 清掉」的形态，
+                        // 记下来会把上一轮的总结一起抹掉。
+                        if (!candidate.tasks.isNullOrEmpty()) {
+                            lastNonEmptyTasksBySession[sessionId] = candidate.tasks
+                        }
                     }
                 }
                 "goal", "goal-updated" -> frame.sessionId?.takeIf(String::isNotBlank)?.let { sessionId ->
@@ -581,6 +604,8 @@ class SharedMobileStore(
             runCatching { wireJson.decodeFromJsonElement(GatewayGoalSnapshot.serializer(), it.toJsonElement()) }.getOrNull()
         }
         tasksBySession[sessionId] = GatewayTaskSnapshot(seq, todos)
+        // 基线里的非空清单同样算「上一轮」，否则重连后副标题会退回「暂无任务」。
+        if (!todos.isNullOrEmpty()) lastNonEmptyTasksBySession[sessionId] = todos
         goalsBySession[sessionId] = GatewayGoalProjection(seq, goal)
     }
 
@@ -707,6 +732,7 @@ class SharedMobileStore(
         contextSnapshot = null
         statsSnapshot = null
         tasksBySession.clear()
+        lastNonEmptyTasksBySession.clear()
         goalsBySession.clear()
         hostSnapshot = null
         lastFrameKind = null
@@ -755,6 +781,12 @@ class SharedMobileStore(
             contextSnapshot = contextSnapshot,
             statsSnapshot = statsSnapshot,
             taskSnapshot = selected?.let(tasksBySession::get),
+            recentTasks = selected?.let { sessionId ->
+                lastNonEmptyTasksBySession[sessionId]?.takeIf { tasks ->
+                    // 当前轮已有清单时不必回看上一轮，避免与 taskSnapshot 给出两套数字。
+                    tasksBySession[sessionId]?.tasks.isNullOrEmpty()
+                }
+            },
             goalSnapshot = selected?.let(goalsBySession::get),
             hostSnapshot = hostSnapshot,
             lastFrameKind = lastFrameKind,
