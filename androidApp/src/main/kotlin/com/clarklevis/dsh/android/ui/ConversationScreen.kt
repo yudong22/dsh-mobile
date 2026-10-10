@@ -3131,10 +3131,19 @@ private fun permissionIcon(value: String?): Int = when (value) {
  * 计数口径与输入框上方的任务面板（`TaskGoalUi` 的 `taskSummary`）保持一致，
  * 避免同一页面上两处对同一份数据给出不同数字。
  *
- * 无任务时返回 null（页头不显示副标题），而不是显示「0 个任务」占位。
+ * **无任务时也必须有文案**，不能返回 null。此前返回 null 会命中两种情况：
+ *  1. 网关未声明 `tasks` 能力（`AndroidSharedStateHolder.kt:1518` 只在能力存在时才请求）；
+ *  2. 会话尚无待办（`todo_write` 还没被调用）。
+ * 两者都会让副标题整行空掉——用户看到的现象就是「副标题有时候没了」，
+ * 而且页头在「有/无任务」之间来回切换时视觉重量会跳。
+ *
+ * 因此统一给固定占位「[NO_TASK_SUBTITLE]」，既保持行高稳定，也如实表达
+ * 「当前没有任务」，而不是留白让用户以为界面坏了。
  */
-internal fun conversationTaskSubtitle(tasks: List<GatewayTask>?): String? {
-    if (tasks.isNullOrEmpty()) return null
+internal const val NO_TASK_SUBTITLE = "暂无任务"
+
+internal fun conversationTaskSubtitle(tasks: List<GatewayTask>?): String {
+    if (tasks.isNullOrEmpty()) return NO_TASK_SUBTITLE
     val completed = tasks.count { it.status == "completed" }
     val active = tasks.count { it.status == "in_progress" }
     val pending = tasks.size - completed - active

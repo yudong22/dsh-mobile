@@ -2,7 +2,6 @@ package com.clarklevis.dsh.android.ui
 
 import com.clarklevis.dsh.shared.protocol.GatewayTask
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -18,10 +17,28 @@ class ConversationTaskSubtitleTest {
 
     private fun task(status: String) = GatewayTask(content = "任务", status = status)
 
+    /**
+     * 无任务时给**固定文案**，不是 null。
+     *
+     * 这条是「副标题有时候没了」的回归守卫：null 会让副标题整行空掉，
+     * 而它命中两种情况——网关未声明 tasks 能力、以及会话还没有待办。
+     */
     @Test
-    fun `no tasks means no subtitle`() {
-        assertNull(conversationTaskSubtitle(null))
-        assertNull(conversationTaskSubtitle(emptyList()))
+    fun `no tasks falls back to a fixed subtitle`() {
+        assertEquals(NO_TASK_SUBTITLE, conversationTaskSubtitle(null))
+        assertEquals(NO_TASK_SUBTITLE, conversationTaskSubtitle(emptyList()))
+    }
+
+    /** 无论有没有任务，副标题都非空且非空白——页头高度不应随之跳动。 */
+    @Test
+    fun `subtitle is never blank`() {
+        val samples = listOf(null, emptyList(), listOf(task("in_progress")), listOf(task("completed")))
+        samples.forEach { tasks ->
+            assertTrue(
+                "副标题不得为空（会导致页头空掉一行）：tasks=$tasks",
+                conversationTaskSubtitle(tasks).isNotBlank()
+            )
+        }
     }
 
     @Test
@@ -70,7 +87,7 @@ class ConversationTaskSubtitleTest {
             val subtitle = conversationTaskSubtitle(tasks)
             assertTrue(
                 "副标题不应声称「后台任务」（协议里没有该概念）：$subtitle",
-                subtitle != null && !subtitle.contains("后台")
+                !subtitle.contains("后台")
             )
         }
     }
