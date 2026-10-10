@@ -53,6 +53,30 @@ internal fun dshConnectionDetailText(state: GatewayConnectionState): String? = w
 internal val GatewayConnectionState.dshIsTransitioning: Boolean
     get() = dshPhase == DshConnectionPhase.IN_PROGRESS
 
+/**
+ * 扫码/手动配对进行中的**阶段文案**。
+ *
+ * 为什么需要单独一条：扫码成功后扫描页立刻关闭、退回任务列表，而配对最长要
+ * [PAIRING_TIMEOUT_MS]（20s）——这段时间此前**没有任何反馈**。手动配对面板恰好
+ * 因为自己渲染了 `isConnecting` 才看得出在动，扫码路径完全没有，所以用户看到的
+ * 是「扫完就没反应了，过一会儿才跳」。
+ *
+ * 分阶段而不是一个笼统的「正在连接」：连接与认证是两件可感知的不同等待，
+ * 分开说得清「卡在哪一步」。候选连接状态可能还没上报（刚起步），此时用第一档。
+ */
+internal fun pairingProgressText(connection: GatewayConnectionState?): String = when (connection) {
+    GatewayConnectionState.AUTHENTICATING -> "正在认证设备…"
+    GatewayConnectionState.CONNECTED -> "已连接，正在加载任务…"
+    GatewayConnectionState.FAILED -> "连接失败"
+    GatewayConnectionState.WAITING_FOR_NETWORK -> "等待网络…"
+    GatewayConnectionState.SUSPENDED -> "连接已暂停"
+    // CONNECTING、DISCONNECTED、null：都还没开始握手，说第一档。
+    else -> "正在连接设备…"
+}
+
+/** 配对进度提示是否该显示：仅在配对进行中显示。 */
+internal fun shouldShowPairingProgress(pairing: Boolean): Boolean = pairing
+
 /** 连接中是否应禁止发起需要联网的操作（新建会话等）。 */
 internal val GatewayConnectionState.dshBlocksNetworkActions: Boolean
     get() = this != GatewayConnectionState.CONNECTED

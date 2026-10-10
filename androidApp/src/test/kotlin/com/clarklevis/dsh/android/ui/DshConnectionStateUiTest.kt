@@ -68,4 +68,52 @@ class DshConnectionStateUiTest {
         assertEquals("正在连接…", dshConnectionDetailText(GatewayConnectionState.CONNECTING))
         assertEquals("正在认证…", dshConnectionDetailText(GatewayConnectionState.AUTHENTICATING))
     }
+
+    // ---- 配对进度（扫码后的空档）----
+
+    /**
+     * 配对进度只在**配对进行中**显示。
+     *
+     * 这是「扫码后到加载前没有过渡」的守卫：扫码成功会立刻关闭扫描页、退回任务列表，
+     * 而配对最长 20s，此前这段时间没有任何反馈。
+     */
+    @Test
+    fun `pairing progress is shown exactly while pairing`() {
+        assertTrue(shouldShowPairingProgress(pairing = true))
+        assertFalse(shouldShowPairingProgress(pairing = false))
+    }
+
+    /** 候选连接还没上报状态时（刚起步）也要有文案，不能是空白。 */
+    @Test
+    fun `pairing progress always has copy even before the candidate reports state`() {
+        assertTrue(pairingProgressText(null).isNotBlank())
+        assertEquals("正在连接设备…", pairingProgressText(null))
+        assertEquals("正在连接设备…", pairingProgressText(GatewayConnectionState.DISCONNECTED))
+        assertEquals("正在连接设备…", pairingProgressText(GatewayConnectionState.CONNECTING))
+    }
+
+    /** 连接与认证是两段可感知的不同等待，必须分得开。 */
+    @Test
+    fun `pairing progress distinguishes connecting from authenticating`() {
+        val connecting = pairingProgressText(GatewayConnectionState.CONNECTING)
+        val authenticating = pairingProgressText(GatewayConnectionState.AUTHENTICATING)
+
+        assertEquals("正在认证设备…", authenticating)
+        assertTrue("两阶段文案不能相同：$connecting", connecting != authenticating)
+    }
+
+    /** 已连接之后仍要说明「还在加载」，否则用户以为卡在连接上。 */
+    @Test
+    fun `connected phase still reports that loading continues`() {
+        val text = pairingProgressText(GatewayConnectionState.CONNECTED)
+        assertTrue("已连接后应说明仍在加载：$text", text.contains("加载"))
+    }
+
+    /** 每种状态都要有非空文案，避免对话框出现空白说明。 */
+    @Test
+    fun `every connection state has non blank pairing copy`() {
+        (GatewayConnectionState.entries.toList() + listOf<GatewayConnectionState?>(null)).forEach { state ->
+            assertTrue("$state 缺少配对进度文案", pairingProgressText(state).isNotBlank())
+        }
+    }
 }

@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -58,6 +60,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -407,6 +410,16 @@ internal fun DshProductApp(
     if (showManualPairing) {
         ManualGatewayPairingSheet(stateHolder) { showManualPairing = false }
     }
+    // 配对进度：扫码路径此前**完全没有反馈**——扫完扫描页立刻关闭、退回任务列表，
+    // 而配对最长要 20s（PAIRING_TIMEOUT_MS），用户看到的是「扫完就没反应了」。
+    // 手动配对面板自带 isConnecting 反馈（主按钮转圈 + 「取消连接」），因此在它打开时
+    // 不再叠加一层，避免同一件事提示两次。
+    if (hosts != null && shouldShowPairingProgress(hosts.pairing) && !showManualPairing) {
+        PairingProgressDialog(
+            connection = hosts.pairingConnection,
+            onCancel = { hosts.cancelPairing() }
+        )
+    }
     stateHolder.platformError?.let { error ->
         // 「重新连接」只在连接**真的需要用户介入**时给出：
         // - 过渡态（连接中/认证中）说明重连已在进行，此时再给一个「重新连接」
@@ -477,6 +490,51 @@ internal fun requiresConversationNavigation(currentRoute: String?): Boolean =
  */
 internal fun isTabToTab(from: String?, to: String?): Boolean =
     from != null && to != null && from != to && from in TAB_ROOT_ROUTES && to in TAB_ROOT_ROUTES
+
+/**
+ * 配对进行中的进度对话框。
+ *
+ * 扫码成功后 `AndroidMultiGatewayStore.pair()` 会新建一个候选连接、握手、认证、
+ * 拉取任务，最长等待 20s（`AndroidMultiGatewayStore.PAIRING_TIMEOUT_MS`）。此前这段
+ * 窗口在扫码路径上**完全没有反馈**（手动配对面板自带反馈，扫码没有），用户看到的是
+ * 「扫完就没反应」。这里给出阶段文案 + 转圈 + 取消入口。
+ *
+ * 用对话框而不是页面内联提示：配对是**模态**过程（期间其它网络操作都被
+ * `dshBlocksNetworkActions` 挡住），盖住下方避免用户在无响应的界面上乱点；
+ * 同时留一个明确的「取消」，不让用户只能干等 20s。
+ */
+@Composable
+private fun PairingProgressDialog(
+    connection: GatewayConnectionState?,
+    onCancel: () -> Unit
+) {
+    DshAlertDialog(
+        title = "正在配对",
+        onDismissRequest = {},
+        dismissLabel = "取消",
+        onDismissClick = onCancel,
+        // 转圈与阶段文案同一行：分两行时转圈悬在文案下方，读起来像是另一个元素。
+        content = {
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("pairing-progress"),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    pairingProgressText(connection),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp
+                )
+            }
+        }
+    )
+}
 
 @Composable
 private fun DrawerDestinationScreen(title: String, message: String, onBack: () -> Unit) {

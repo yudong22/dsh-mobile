@@ -77,6 +77,15 @@ class AndroidMultiGatewayStore(private val application: Application) {
     var error by mutableStateOf<String?>(null)
     var pairing by mutableStateOf(false)
         private set
+    /**
+     * 配对过程中**候选连接**的实时连接状态；不在配对时为 null。
+     *
+     * `pairing: Boolean` 只说得出「正在配对」，说不出「到哪一步了」——而扫码后到
+     * 会话列表加载出来之间最长有 [PAIRING_TIMEOUT_MS]，这段时间此前没有任何反馈。
+     * 这里把候选 Runtime 的连接状态镜像出来，UI 据此给出分阶段的进度文案。
+     */
+    var pairingConnection by mutableStateOf<GatewayConnectionState?>(null)
+        private set
     var ready by mutableStateOf(false)
         private set
     val activeProfile: GatewayProfile? get() = profiles.firstOrNull { it.localId == activeId }
@@ -242,6 +251,7 @@ class AndroidMultiGatewayStore(private val application: Application) {
                 previous?.join()
                 var candidate: AndroidAppGraph? = null
                 var committed = false
+                var stateMirror: Job? = null
                 try {
                     val payload = GatewayPairingPayloadParser.parse(raw, System.currentTimeMillis())
                     val endpoints = GatewayIdentity.endpoints(payload)
@@ -259,6 +269,15 @@ class AndroidMultiGatewayStore(private val application: Application) {
                         if (frame.kind == "hello") identity.complete(frame)
                     }
                     withContext(candidate.gatewayDispatcher) { candidate.gatewayRuntime.pair(raw) }
+                    // 把候选 Runtime 的连接状态镜像给 UI（扫码后的那 20s 里，用户此前
+                    // 只能看着静止的任务列表）。镜像在 Main 上写，保持 Compose 状态单线程。
+                    stateMirror = scope.launch {
+                        candidate.gatewayRuntime.state.collect { runtimeState ->
+                            withContext(Dispatchers.Main.immediate) {
+                                if (pairing) pairingConnection = runtimeState.connection
+                            }
+                        }
+                    }
                     val state =
                         withTimeout(PAIRING_TIMEOUT_MS) {
                             candidate.gatewayRuntime.state.first {
@@ -266,6 +285,7 @@ class AndroidMultiGatewayStore(private val application: Application) {
                                     it.connection == GatewayConnectionState.FAILED
                             }
                         }
+                    stateMirror.cancel()
                     check(state.connection == GatewayConnectionState.CONNECTED) { state.lastError ?: "配对失败" }
                     val hello = identity.await()
                     profile = updated(profile, hello, endpoints.first())
@@ -280,6 +300,9 @@ class AndroidMultiGatewayStore(private val application: Application) {
                 } catch (failure: Exception) {
                     error = "配对失败：${failure.message}"
                 } finally {
+                    // 超时/取消路径可能没走到上面的 cancel：统一在此收尾，避免
+                    // 一个永不结束的 collect 泄漏（它持有 candidate 引用）。
+                    stateMirror?.cancel()
                     if (!committed) {
                         candidate?.let { graph ->
                             withContext(NonCancellable + graph.gatewayDispatcher) {
@@ -294,6 +317,7 @@ class AndroidMultiGatewayStore(private val application: Application) {
                         }
                     }
                     pairing = false
+                    pairingConnection = null
                 }
             }
     }
