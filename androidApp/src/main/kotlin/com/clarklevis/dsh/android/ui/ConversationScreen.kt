@@ -536,6 +536,26 @@ private fun ConversationPage(
                 totalEventCount = stateHolder.snapshot.selectedHistoryTotalEventCount
             )
         }
+        // 已有旧内容而刷新失败时，用一条轻量提示条说明「你看到的是旧内容」。
+        // 见 shouldShowStaleHistoryNotice 的说明：此前这种情况完全静默。
+        val staleHistoryError = stateHolder.snapshot.selectedHistoryError
+        if (
+            shouldShowStaleHistoryNotice(
+                error = staleHistoryError,
+                isLoading = stateHolder.snapshot.selectedHistoryIsLoading,
+                hasLocalContent = stateHolder.snapshot.conversation.isNotEmpty()
+            )
+        ) {
+            StaleHistoryNotice(
+                message = staleHistoryError.orEmpty(),
+                onRetry = { stateHolder.reloadSelectedHistory() },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = DshScreenHorizontalPadding)
+                    .padding(top = 8.dp)
+                    .zIndex(2f)
+            )
+        }
         ConversationBottomFade(
             modifier = Modifier.align(Alignment.BottomCenter),
             contentHeight = bottomContentHeight
@@ -637,6 +657,25 @@ internal fun shouldShowInitialHistoryOverlay(
     hasLocalContent: Boolean
 ): Boolean = isLoading && !isLoadingOlder && !hasLocalContent
 
+/**
+ * 本地**已有**内容、但刷新失败时，是否要提示。
+ *
+ * 为什么需要单独一条：`selectedHistoryError` 目前只被「列表为空」那个分支消费
+ * （本文件 `items.isEmpty() && !selectedHistoryIsLoading`）。于是当会话在内存/缓存里
+ * 已经有旧内容时（正是「消息流看起来还在、但其实是旧的」这种场景），刷新失败或
+ * 20s 快照超时**既不显示 loading 遮罩、也不显示错误**——用户看到一份静止的旧消息流，
+ * 没有任何提示，也没有刷新入口。用户反馈的「进入详情页后消息流不更新」之所以
+ * 毫无征兆，就是这条静默路径。
+ *
+ * 这里补一个轻量提示条（不是全屏遮罩：旧内容仍可读，不该被盖住）。
+ * 空列表的情况仍走原来的全屏错误块，两者互斥以免重复提示。
+ */
+internal fun shouldShowStaleHistoryNotice(
+    error: String?,
+    isLoading: Boolean,
+    hasLocalContent: Boolean
+): Boolean = error != null && !isLoading && hasLocalContent
+
 internal fun historyLoadingProgressText(loadedEventCount: Int, totalEventCount: Int?): String = when {
     totalEventCount != null -> "正在加载历史记录 · $loadedEventCount/$totalEventCount"
     loadedEventCount > 0 -> "正在自动加载更早记录 · 已同步 $loadedEventCount 个事件"
@@ -679,6 +718,44 @@ internal fun HistoryLoadingOverlay(
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center
             )
+        }
+    }
+}
+
+@Composable
+private fun StaleHistoryNotice(
+    message: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val palette = dshPalette()
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("stale-history-notice"),
+        shape = DshCardCornerRadius,
+        color = palette.surface,
+        border = androidx.compose.foundation.BorderStroke(0.8.dp, palette.cardBorder),
+        shadowElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                // 明确说「以下内容可能不是最新」，否则用户会把旧内容当成本次结果。
+                "内容可能不是最新：$message",
+                color = palette.textSecondary,
+                fontSize = DshCaptionFontSize,
+                lineHeight = 18.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onRetry, modifier = Modifier.testTag("stale-history-retry")) {
+                Text("重新加载", color = palette.primary, fontSize = DshCaptionFontSize)
+            }
         }
     }
 }

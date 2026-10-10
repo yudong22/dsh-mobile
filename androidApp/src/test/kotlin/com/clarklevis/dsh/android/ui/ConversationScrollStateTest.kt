@@ -150,4 +150,62 @@ class ConversationScrollStateTest {
             historyLoadingProgressText(12, 20)
         )
     }
+
+    /**
+     * 已有旧内容、刷新失败时必须提示。
+     *
+     * 这是「消息流不更新却没有提示」的回归守卫：此前 `selectedHistoryError` 只在
+     * 列表为空的分支里被读，于是**只要本地还有旧消息，刷新失败/快照超时就是静默的**，
+     * 用户看到一份静止的旧消息流、既没有 loading 也没有错误、也没有刷新入口。
+     */
+    @Test
+    fun `stale content with a history error is surfaced`() {
+        assertTrue(
+            shouldShowStaleHistoryNotice(
+                error = "历史记录加载超时，请重试",
+                isLoading = false,
+                hasLocalContent = true
+            )
+        )
+    }
+
+    /** 列表为空时不走这条：那种情况由原来的全屏错误块承担，避免重复提示。 */
+    @Test
+    fun `empty timeline keeps using the full screen error block`() {
+        assertFalse(
+            shouldShowStaleHistoryNotice(
+                error = "历史记录加载超时，请重试",
+                isLoading = false,
+                hasLocalContent = false
+            )
+        )
+    }
+
+    /** 正在加载时不提示错误——尚未失败，提示会误导。 */
+    @Test
+    fun `no stale notice while a reload is in flight`() {
+        assertFalse(
+            shouldShowStaleHistoryNotice(
+                error = "历史记录加载超时，请重试",
+                isLoading = true,
+                hasLocalContent = true
+            )
+        )
+    }
+
+    /** 没有错误时不提示。 */
+    @Test
+    fun `no stale notice without an error`() {
+        assertFalse(
+            shouldShowStaleHistoryNotice(error = null, isLoading = false, hasLocalContent = true)
+        )
+    }
+
+    /** 成功加载后提示必须消失（错误被清空即可）。 */
+    @Test
+    fun `stale notice clears once the error is gone`() {
+        assertFalse(
+            shouldShowStaleHistoryNotice(error = null, isLoading = false, hasLocalContent = true)
+        )
+    }
 }
