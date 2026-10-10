@@ -442,6 +442,18 @@ internal fun WorkspaceDrawer(
                             .clip(drawerPageShape)
                         else Modifier
                     )
+                    // 整页横向拖动开合抽屉。
+                    //
+                    // **实测边界（Android 模拟器，`adb shell input swipe` + 探针计数）**：
+                    // 详情页内容里有一个横向 `HorizontalPager`（对话 / 轨迹），它会在
+                    // 拖动**开始**时就赢得手势竞争，父级 draggable 完全收不到位移——
+                    // 在 pager 上横向拖：draggable 收到 0px（两个方向、重复多次一致）；
+                    // 同样动作落在页头（pager 之外）：收到 −755 ~ −786px。
+                    //
+                    // 也就是说：**只有页头那一条能用拖动开合**，正文区一律由 pager 拿走。
+                    // 这不是缺陷——正文横向滑动手势本就应该留给「对话 / 轨迹」切换，
+                    // 抽屉另有页头的专用按钮（`LocalDrawerOpener`）。保留这里的
+                    // draggable 是为了页头那一条，下面的 slop 防抖也只对页头有意义。
                     .draggable(
                         orientation = Orientation.Horizontal,
                         state = rememberDraggableState { delta ->

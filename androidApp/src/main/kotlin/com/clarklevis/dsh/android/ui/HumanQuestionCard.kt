@@ -538,6 +538,22 @@ private fun HeaderIconButton(iconRes: Int, contentDescription: String, onClick: 
     }
 }
 
+/**
+ * 提问卡片的字号。**两张提问卡片共用这一组**（composer 位的 [HumanQuestionCard]
+ * 与时间线内联的 [AskQuestionToolCard]），避免两处各写一套又逐渐分叉。
+ *
+ * 卡片此前自成一套偏大的字号（题干 20sp / 选项 16sp / 输入 16sp），**比页面标题还大**：
+ * 全局层级是 页面标题 18sp / 区块标题 17sp / 正文 15sp / 辅助 13sp
+ * （见 [DshPageTitleFontSize] 一族）。卡片夹在对话流里，字号超过页面标题会让
+ * 整个界面看起来「被这张卡顶起来」，也正是用户反馈的「字太大」。
+ *
+ * 这里与 [DshSettingsRowMinHeight] 那次收敛是同一处理：字号对齐全局层级，
+ * 靠留白与卡片边界维持层级感，而不是靠放大字号。
+ */
+internal val QuestionTitleFontSize = DshSectionTitleFontSize
+internal val QuestionBodyFontSize = DshBodyFontSize
+internal val QuestionCaptionFontSize = DshCaptionFontSize
+
 @Composable
 internal fun QuestionHeading(question: GatewayQuestion) {
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -550,7 +566,12 @@ internal fun QuestionHeading(question: GatewayQuestion) {
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
             )
         }
-        Text(question.question, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            question.question,
+            fontSize = QuestionTitleFontSize,
+            lineHeight = 23.sp,
+            fontWeight = FontWeight.SemiBold
+        )
         question.detail?.takeIf(String::isNotEmpty)?.let { detail ->
             DshMarkdownText(markdown = detail, compact = true)
         }
@@ -632,8 +653,8 @@ internal fun AnswerControls(
                     ) {
                         Text(
                             metadata.title,
-                            fontSize = 16.sp,
-                            lineHeight = 21.sp,
+                            fontSize = QuestionBodyFontSize,
+                            lineHeight = 20.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         if (metadata.isRecommended) {
@@ -652,8 +673,8 @@ internal fun AnswerControls(
                     option.description?.takeIf(String::isNotEmpty)?.let { description ->
                         Text(
                             description,
-                            fontSize = 14.sp,
-                            lineHeight = 20.sp,
+                            fontSize = QuestionCaptionFontSize,
+                            lineHeight = 18.sp,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
                         )
                     }
@@ -697,8 +718,8 @@ private fun CustomAnswerField(value: String, onValueChange: (String) -> Unit, ha
                 Text(
                     if (hasOptions) "或输入自定义答案" else "输入你的答案",
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f),
-                    fontSize = 16.sp,
-                    lineHeight = 22.sp
+                    fontSize = QuestionBodyFontSize,
+                    lineHeight = 20.sp
                 )
             }
             BasicTextField(
@@ -717,8 +738,8 @@ private fun CustomAnswerField(value: String, onValueChange: (String) -> Unit, ha
                     },
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
                     color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 16.sp,
-                    lineHeight = 22.sp
+                    fontSize = QuestionBodyFontSize,
+                    lineHeight = 20.sp
                 ),
                 cursorBrush = SolidColor(DshColors.Ocean),
                 minLines = if (hasOptions) 1 else 3,

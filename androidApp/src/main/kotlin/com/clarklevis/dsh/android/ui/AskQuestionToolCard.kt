@@ -124,11 +124,27 @@ internal fun AskQuestionToolCard(
             if (answered) {
                 SettledAnswers(result = result)
             } else if (request == null) {
+                // 提问已不在待答状态（例如已在别处作答）时，此前只渲染一句说明，
+                // 于是卡片既**看不到当时有哪些选项**，也没有任何可做的事——
+                // 用户反馈的「没有选择、没有后续操作」正是这个形态。
+                // 这里把选项按只读列出，并说清下一步去哪。
                 Text(
                     "该提问已不在待答状态，无法在应用内作答。",
                     fontSize = 13.sp,
+                    lineHeight = 18.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
                 )
+                question.options.orEmpty().takeIf(List<*>::isNotEmpty)?.let { options ->
+                    ReadOnlyOptions(options)
+                }
+                if (question.options.isNullOrEmpty()) {
+                    Text(
+                        "该问题没有预设选项，可在下方输入框回答。",
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
+                    )
+                }
             } else {
                 AnswerControls(
                     question = question,
@@ -187,6 +203,61 @@ internal fun AskQuestionToolCard(
                         )
                     }
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 只读选项列表：提问已不可作答时，仍让用户看到**当时提供了哪些选择**。
+ *
+ * 不参与交互（没有点击、没有单选/多选图标），因此刻意不复用 [AnswerControls]——
+ * 后者是可交互控件，会在只读场景下暗示「可以点」，点下去却什么都不发生。
+ */
+@Composable
+private fun ReadOnlyOptions(options: List<GatewayQuestionOption>) {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        options.forEach { option ->
+            val metadata = optionMetadata(option.label)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.035f))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        metadata.title,
+                        fontSize = DshBodyFontSize,
+                        lineHeight = 20.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                    )
+                    if (metadata.isRecommended) {
+                        Text(
+                            "推荐",
+                            fontSize = 10.sp,
+                            lineHeight = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = DshColors.Ocean,
+                            modifier = Modifier
+                                .background(DshColors.Ocean.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+                option.description?.takeIf(String::isNotEmpty)?.let { description ->
+                    Text(
+                        description,
+                        fontSize = DshCaptionFontSize,
+                        lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                    )
+                }
             }
         }
     }
@@ -291,7 +362,7 @@ private fun SettledAnswers(result: ConversationItem) {
         val text = result.text.takeIf(String::isNotBlank) ?: result.title
         Text(
             text,
-            fontSize = 15.sp,
+            fontSize = DshBodyFontSize,
             lineHeight = 21.sp,
             color = if (result.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
         )
@@ -308,8 +379,13 @@ internal fun parseQuestions(arguments: String): List<GatewayQuestion> {
     val array = parsed["questions"] as? JsonArray ?: return emptyList()
     return array.mapIndexedNotNull { index, element ->
         val obj = element as? JsonObject ?: return@mapIndexedNotNull null
+        // 题干字段的兼容链必须与 `GatewayWireDecoder` 保持一致（那里是
+        // question → prompt → text → header）。此前这里漏了 `text`，
+        // 于是同一份参数「网关认得、卡片认不得」，内联卡片会退化成
+        // 「无法解析这道提问的参数」——用户看到的就是「没有选择」。
         val text = (obj["question"] as? JsonPrimitive)?.contentOrNull
             ?: (obj["prompt"] as? JsonPrimitive)?.contentOrNull
+            ?: (obj["text"] as? JsonPrimitive)?.contentOrNull
             ?: (obj["header"] as? JsonPrimitive)?.contentOrNull
             ?: return@mapIndexedNotNull null
         val options = (obj["options"] as? JsonArray)?.mapNotNull { option ->
