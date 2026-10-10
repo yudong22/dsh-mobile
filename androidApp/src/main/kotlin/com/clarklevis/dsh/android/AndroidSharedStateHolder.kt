@@ -790,8 +790,21 @@ class AndroidSharedStateHolder(
                 restoreConversationFromCacheIfAvailable(sessionId)
                 projectionActor.selectSession(sessionId, afterPublish)
                 if (trajectoryIsActive) publishTrajectory()
+                // **无论是否已连接都要登记订阅意图。**
+                //
+                // `GatewayRuntime.subscribe()` 先记 `subscribedSessionId`、再发送；
+                // 未连接时发送会被拒（`not-connected`，属 [RequestRejectionPolicy]
+                // 的传输类静默拒绝），但**意图已经记住**，重连时
+                // `replayAfterHelloLocked()`（`GatewayRuntime.kt:1105`）会补发。
+                //
+                // 此前这里用 `connection == CONNECTED` 把整段包住，未连接时连意图都不登记：
+                // 于是 `subscribedSessionId` 仍停在**上一个**会话，重连补发的是旧会话的订阅，
+                // 新进入的会话永远收不到 `session-snapshot`——消息流就一直停在加载态/
+                // 本地缓存，即用户反馈的「进入详情页后消息流不更新」。
+                // 冷启动、从通知进入、切后台再回前台都会命中（那时连接尚未 CONNECTED）。
+                appGraph.gatewayRuntime.subscribe(sessionId)
+                // 诊断只在真的连上时记录，保持既有日志语义。
                 if (gatewayState.connection == GatewayConnectionState.CONNECTED) {
-                    appGraph.gatewayRuntime.subscribe(sessionId)
                     appGraph.diagnostics.approval(
                         stage = "session-subscribed",
                         hasSession = true,

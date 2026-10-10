@@ -1511,6 +1511,41 @@ class GatewayRuntimeIntegrationTest {
         override suspend fun delay(milliseconds: Long) = Unit
     }
 
+    /**
+     * 契约：**未连接**时调 subscribe 也要登记意图，重连后补发。
+     *
+     * `AndroidSharedStateHolder.selectSession` 依赖这条契约：它现在无条件调用
+     * subscribe（不再用 `connection == CONNECTED` 包住），未连接时发送虽被拒，
+     * 但意图必须留下来，否则重连补发的是**上一个**会话，新进入的会话永远收不到
+     * `session-snapshot`（订阅作用域校验见 `AssistantStreamState.acceptScoped`），
+     * 消息流便停在加载态——即用户反馈的「进入详情页后消息流不更新」。
+     *
+     * 若有人把 subscribe 改成「未连接就直接 return」，这条会失败。
+     */
+    @Test
+    fun subscribeWhileDisconnectedIsReplayedAfterHello() = runTest {
+        val transport = FakeTransport()
+        val runtime = newRuntime(transport)
+        runCurrent()
+
+        // 未连接：发送被拒，但意图必须记住。
+        assertFalse(runtime.subscribe("session-b"))
+
+        runtime.connect("ws://localhost/mobile")
+        transport.opened()
+        transport.receive("""{"kind":"hello","capabilities":[],"protocol":3}""")
+        runCurrent()
+
+        val subscribed = transport.sentPayloads.filter {
+            wireJson.parseToJsonElement(it).jsonObject["type"]?.jsonPrimitive?.content == "subscribe"
+        }
+        assertEquals(1, subscribed.size)
+        assertEquals(
+            "session-b",
+            wireJson.parseToJsonElement(subscribed.single()).jsonObject["sessionId"]?.jsonPrimitive?.content
+        )
+    }
+
     companion object {
         private const val BASE64_URL_ALPHABET =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
