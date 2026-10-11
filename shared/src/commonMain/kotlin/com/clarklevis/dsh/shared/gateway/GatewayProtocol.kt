@@ -59,12 +59,21 @@ data class GatewayOutgoingImage(
 enum class GatewayRequestLanePolicy { COALESCE_LATEST, FIFO, REJECT_IF_BUSY }
 
 /**
- * 远程推送投递通道。APNs 与 FCM 的 token 都由平台层获取并上报，网关只负责
- * 存储与投递，平台 SDK 不进入 `commonMain`。
+ * 远程推送投递通道。APNs、FCM、Mi Push 与 vivo push 的 token 都由平台层获取并上报，
+ * 网关只负责存储与投递，平台 SDK 不进入 `commonMain`。
+ *
+ * Mi Push（小米推送）走小米系统级长连，不依赖应用进程，因此能绕过 MIUI/HyperOS 的
+ * 后台冻结（UidFrozen/Greezer）对 FCM 自启的拦截——这是 `.35`（小米/Redmi）设备上
+ * 离线推送能稳定到达的关键，是小米设备上的「第二条通道」。
+ *
+ * vivo push（vivo 推送）同理，走 vivo 系统级长连，绕过 vivo/iQOO 设备（`.77`）的
+ * 后台冻结——它是这些设备上的第二条通道，FCM 仍是其余 Android 设备的兜底。
  */
 enum class GatewayPushPlatform(val wireValue: String) {
     APNS("apns"),
-    FCM("fcm");
+    FCM("fcm"),
+    MIPUSH("mipush"),
+    VIVOPUSH("vivopush");
 
     companion object {
         fun fromWire(value: String?): GatewayPushPlatform? =

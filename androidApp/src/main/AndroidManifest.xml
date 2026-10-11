@@ -9,6 +9,16 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Mi Push 需要本权限才能接收系统推送（小米/红米的系统级通道）。 -->
+    <permission
+        android:name="${applicationId}.permission.MIPUSH_RECEIVE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.permission.MIPUSH_RECEIVE" />
+    <!-- vivo 推送接收系统广播所需的权限（vivo/iQOO 系统级通道）。 -->
+    <permission
+        android:name="${applicationId}.permission.PUSH_RECEIVE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.permission.PUSH_RECEIVE" />
 
     <uses-feature
         android:name="android.hardware.camera.any"
@@ -50,6 +60,43 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+        <!--
+          Mi Push 广播接收器（小米/红米的系统级推送，绕过 MIUI/HyperOS 的后台冻结）。
+          三个 intent-filter 是 SDK 的硬性要求：RECEIVE_MESSAGE 收注册结果与透传，
+          MESSAGE_ARRIVED 收到达，ERROR 收异常。必须 exported=true，否则收不到系统广播。
+        -->
+        <receiver
+            android:name=".MiPushMessageReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.xiaomi.mipush.RECEIVE_MESSAGE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.xiaomi.mipush.MESSAGE_ARRIVED" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.xiaomi.mipush.ERROR" />
+            </intent-filter>
+        </receiver>
+        <!--
+          vivo 推送广播接收器（vivo/iQOO 的系统级推送，绕过后台冻结）。
+          RECEIVE 这个 action 是 v4 SDK 的标准系统广播；必须 exported=true，否则收不到。
+          app_id / api_key 为 vivo 开发者后台的应用凭证（build.gradle 从 local.properties
+          以 manifestPlaceholder 注入），缺失时 SDK 初始化会抛异常、注册跳过。
+        -->
+        <receiver
+            android:name=".VivoPushMessageReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.vivo.pushclient.action.RECEIVE" />
+            </intent-filter>
+        </receiver>
+        <meta-data
+            android:name="com.vivo.push.app_id"
+            android:value="${vivoAppId}" />
+        <meta-data
+            android:name="com.vivo.push.api_key"
+            android:value="${vivoAppKey}" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.workspace-files"

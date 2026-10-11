@@ -1278,22 +1278,31 @@ class AndroidSharedStateHolder(
     }
 
     /**
-     * 上报本机的 FCM 投递地址。
+     * 上报本机的全部投递地址（可能包含 FCM、Mi Push 等多个通道）。
      *
      * 通道未就绪时直接返回而不排队：地址已落盘在 [AndroidPushRegistrationStore]，
      * 连接建立后由 [resendPushRegistration] 重发。
      *
      * 这里统一盖上系统是否允许通知的当前值。所有上报路径都经过本方法，因此只有这一个
      * 出口，不会出现某条路径漏带——那会让用户在系统里关掉通知后仍然收到推送。
+     *
+     * 一台小米设备同时持有 FCM 与 Mi Push 两个地址，两者都要上报；由网关决定发哪一个
+     * （见 gateway 的 `pushTargets` 去重，优先 Mi Push）。
      */
-    fun submitPushRegistration(registration: com.clarklevis.dsh.shared.gateway.GatewayPushRegistration) {
+    fun submitPushRegistration(registrations: List<com.clarklevis.dsh.shared.gateway.GatewayPushRegistration>) {
         val appGraph = graph ?: return
         if (gatewayState.connection != GatewayConnectionState.CONNECTED) return
-        val withPreference = registration.copy(notifyInBackground = canNotifyInBackground(appGraph))
-        appGraph.gatewayScope.launch {
-            appGraph.gatewayRuntime.sendRequest(GatewayRequests.registerPush(withPreference))
+        for (registration in registrations) {
+            val withPreference = registration.copy(notifyInBackground = canNotifyInBackground(appGraph))
+            appGraph.gatewayScope.launch {
+                appGraph.gatewayRuntime.sendRequest(GatewayRequests.registerPush(withPreference))
+            }
         }
     }
+
+    /** 单个地址的上报重载（接收器等单通道来源更顺手）。 */
+    fun submitPushRegistration(registration: com.clarklevis.dsh.shared.gateway.GatewayPushRegistration) =
+        submitPushRegistration(listOf(registration))
 
     /**
      * 系统是否允许通知。
@@ -1330,12 +1339,13 @@ class AndroidSharedStateHolder(
         val appGraph = graph ?: return
         val context = appGraph.application.applicationContext
         val stored = AndroidPushRegistrationStore.current(context)
-        if (stored != null) {
+        if (stored.isNotEmpty()) {
             submitPushRegistration(stored)
             return
         }
-        // 没有落盘值：主动取一次（异步），成功后再落盘并上报。
-        AndroidPushRegistrationStore.fetchAndSave(context) { registration ->
+        // 没有落盘值：主动取一次 FCM 当前 token（异步），成功后再落盘并上报。
+        // Mi Push 的 token 由接收器在注册结果回调里落盘，无需此处主动取。
+        AndroidPushRegistrationStore.fetchFcmAndSave(context) { registration ->
             if (gatewayState.connection == GatewayConnectionState.CONNECTED) {
                 submitPushRegistration(registration)
             }

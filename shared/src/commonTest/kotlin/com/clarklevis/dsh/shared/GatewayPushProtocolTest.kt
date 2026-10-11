@@ -21,8 +21,12 @@ class GatewayPushProtocolTest {
     @Test fun platformRoundTripsItsWireValue() {
         assertEquals("apns", GatewayPushPlatform.APNS.wireValue)
         assertEquals("fcm", GatewayPushPlatform.FCM.wireValue)
+        assertEquals("mipush", GatewayPushPlatform.MIPUSH.wireValue)
+        assertEquals("vivopush", GatewayPushPlatform.VIVOPUSH.wireValue)
         assertEquals(GatewayPushPlatform.APNS, GatewayPushPlatform.fromWire("apns"))
         assertEquals(GatewayPushPlatform.FCM, GatewayPushPlatform.fromWire("fcm"))
+        assertEquals(GatewayPushPlatform.MIPUSH, GatewayPushPlatform.fromWire("mipush"))
+        assertEquals(GatewayPushPlatform.VIVOPUSH, GatewayPushPlatform.fromWire("vivopush"))
         assertEquals(null, GatewayPushPlatform.fromWire("wns"))
         assertEquals(null, GatewayPushPlatform.fromWire(null))
     }

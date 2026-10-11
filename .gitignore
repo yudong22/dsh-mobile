@@ -44,5 +44,9 @@ keystore.properties
 # push project and every registered signing-certificate fingerprint (see Docs/firebase-setup.md).
 google-services.json
 
+# vivo push credentials file (appId/appKey/appSecret). Lives at repo root as a local copy of the
+# vivo developer-console secrets; never committed.
+.vivopush
+
 # Local AI-assistant / editor state
 .claude/

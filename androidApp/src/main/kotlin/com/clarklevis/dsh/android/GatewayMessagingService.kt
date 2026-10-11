@@ -2,7 +2,6 @@ package com.clarklevis.dsh.android
 
 import android.util.Log
 import com.clarklevis.dsh.shared.gateway.GatewayPushPlatform
-import com.clarklevis.dsh.shared.gateway.GatewayPushRegistration
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
@@ -30,9 +29,9 @@ class GatewayMessagingService : FirebaseMessagingService() {
         // 按平台保存单个地址，token 轮换后旧地址会静默失效，必须立即重报。
         // 通道未就绪时 `submitPushRegistration` 会丢弃这次请求，但地址已落盘，
         // 连接建立后由 `AndroidSharedStateHolder` 重发。
-        AndroidPushRegistrationStore.save(applicationContext, token)
-        AndroidPushRegistrationStore.current(applicationContext)?.let { registration ->
-            scope.launch { AndroidPushRegistrationBus.submit(registration) }
+        AndroidPushRegistrationStore.save(applicationContext, GatewayPushPlatform.FCM, token)
+        scope.launch {
+            AndroidPushRegistrationBus.submit(AndroidPushRegistrationStore.current(applicationContext))
         }
     }
 
@@ -63,7 +62,3 @@ class GatewayMessagingService : FirebaseMessagingService() {
         const val KIND_KEY = "kind"
     }
 }
-
-/** 便于测试与预览的注册表构造。 */
-internal fun fcmRegistration(token: String): GatewayPushRegistration =
-    GatewayPushRegistration(platform = GatewayPushPlatform.FCM, token = token)

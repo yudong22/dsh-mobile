@@ -45,11 +45,37 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.clarklevis.dsh.android"
+        // 与 vivo/Mi Push 开发者后台登记的应用包名对齐（均为 com.yudong22.dshapp），
+        // 否则系统级推送的 regId 无法绑定到本应用、消息会被丢弃。
+        applicationId = "com.yudong22.dshapp"
         minSdk = 24
         targetSdk = 36
         versionCode = 27
         versionName = "1.9.8"
+
+        // Mi Push app id/key (Xiaomi/Redmi system push). Read from `local.properties`
+        // (the same file Gradle uses for the SDK location); absent there, these stay
+        // empty and Mi Push registration is skipped at runtime — the app still builds
+        // and runs on non-Xiaomi hardware.
+        val localProps = Properties().apply {
+            rootProject.file("local.properties").takeIf { it.isFile }
+                ?.inputStream()?.use(::load)
+        }
+        val miPushAppId = localProps.getProperty("mipush.appId", "").trim()
+        val miPushAppKey = localProps.getProperty("mipush.appKey", "").trim()
+        buildConfigField("String", "MIPUSH_APP_ID", "\"$miPushAppId\"")
+        buildConfigField("String", "MIPUSH_APP_KEY", "\"$miPushAppKey\"")
+
+        // vivo push app id/key (vivo/iQOO system push). Same `local.properties` source;
+        // absent → empty → registration skipped at runtime on non-vivo hardware.
+        val vivoAppId = localProps.getProperty("vivo.appId", "").trim()
+        val vivoAppKey = localProps.getProperty("vivo.appKey", "").trim()
+        buildConfigField("String", "VIVO_APP_ID", "\"$vivoAppId\"")
+        buildConfigField("String", "VIVO_APP_KEY", "\"$vivoAppKey\"")
+        // 注入到 AndroidManifest 的 vivo 接收器 meta-data（com.vivo.push.app_id/api_key）。
+        // 缺失时为空字符串，SDK 初始化会抛异常并由 VivoPushInitializer 静默跳过。
+        manifestPlaceholders["vivoAppId"] = vivoAppId
+        manifestPlaceholders["vivoAppKey"] = vivoAppKey
     }
 
     testOptions {
@@ -92,7 +118,7 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = false
+        buildConfig = true
     }
 
     packaging {
@@ -141,6 +167,17 @@ dependencies {
     // libraries must not carry their own version.
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+
+    // Mi Push SDK (Xiaomi/Redmi background-freeze-proof channel). The AAR is committed
+    // under libs/ so a build needs no extra repository; this declaration is skipped when
+    // the file is absent, keeping the project buildable without it.
+    val miPushAar = file("libs/MiPush_SDK_Client_7_12_4-C_3rd.aar")
+    if (miPushAar.exists()) implementation(files(miPushAar))
+
+    // vivo push SDK (vivo/iQOO background-freeze-proof channel). Same pattern as Mi Push:
+    // the AAR is committed under libs/ and this declaration is skipped when the file is absent.
+    val vivoPushAar = file("libs/vpush_clientSDK_v4.1.7.0_517.aar")
+    if (vivoPushAar.exists()) implementation(files(vivoPushAar))
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
